@@ -25,21 +25,42 @@ unit-tested in isolation.
 - The **Not a PLC** integration installed and set up (it exposes the websocket
   API this card consumes).
 
-## Installation (manual, during development)
+## Installation via HACS (custom repository)
 
-1. `npm install && npm run build` — produces `dist/not-a-plc-card.js`.
-2. Copy that file to `config/www/not-a-plc-card.js` in Home Assistant.
-3. Add it as a dashboard resource (Settings → Dashboards → Resources) as a
-   JavaScript module: `/local/not-a-plc-card.js`.
-4. Add a card of type `custom:not-a-plc-card` to a dashboard.
+1. In Home Assistant: **HACS → ⋮ (top right) → Custom repositories**.
+2. Repository: `https://github.com/HermelerEngineering/ha-not-a-plc-card`
+   — Category: **Dashboard**. Add it.
+3. Open the new **Not a PLC Card** entry and **Download** it. HACS fetches the
+   built `not-a-plc-card.js` from the latest release and registers the dashboard
+   resource for you.
+4. Add a card of type `custom:not-a-plc-card` to a dashboard:
 
 ```yaml
 type: custom:not-a-plc-card
 title: Ventilation logic
 ```
 
-HACS packaging (custom "Lovelace"/dashboard repository) comes with the first
-tagged release.
+HACS installs the file attached to a GitHub **release** (built by the release
+workflow), so make sure the repository has at least one release — see below.
+
+## Installation (manual, during development)
+
+1. `npm install && npm run build` — produces `dist/not-a-plc-card.js`.
+2. Copy that file to `config/www/not-a-plc-card.js` in Home Assistant.
+3. Add it as a dashboard resource (Settings → Dashboards → Resources) as a
+   JavaScript module: `/local/not-a-plc-card.js`.
+4. Add a card of type `custom:not-a-plc-card` to a dashboard (as above).
+
+## Cutting a release
+
+The bundle is not committed; it is built on demand. Pushing a version tag runs
+the release workflow, which builds `not-a-plc-card.js` and attaches it to the
+GitHub release HACS installs from:
+
+```bash
+git tag v0.0.1
+git push origin v0.0.1
+```
 
 ## Development
 

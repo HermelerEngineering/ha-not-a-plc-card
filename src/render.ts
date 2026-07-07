@@ -1,0 +1,257 @@
+/**
+ * SVG rendering of a ladder program, coloured by live power flow.
+ *
+ * Layout is a simple grid: the main series of a rung runs along a baseline row;
+ * parallel branches hang below it. Everything is measured in grid cells first,
+ * then drawn to pixels. Colours come from CSS custom properties so the card
+ * follows the Home Assistant theme.
+ *
+ * This module owns only presentation; all truth about what is energised comes
+ * from `computePowerFlow` (see power-flow.ts).
+ */
+
+import { SVGTemplateResult, svg } from "lit";
+
+import {
+  BranchEl,
+  ContactEl,
+  Element,
+  Network,
+  NotEl,
+  Rung,
+  isContact,
+  isNot,
+} from "./ir";
+import { PowerFlow } from "./power-flow";
+
+const CELL_W = 88;
+const CELL_H = 48;
+const PAD = 14;
+const TITLE_H = 22;
+const RAIL_W = 10;
+const SYMBOL_HALF = 9;
+
+interface Measure {
+  cols: number;
+  rows: number;
+}
+
+function measureElement(el: Element): Measure {
+  if (isContact(el)) return { cols: 1, rows: 1 };
+  if (isNot(el)) return measureSeries(el.not);
+  let cols = 1;
+  let rows = 0;
+  for (const path of el.branch) {
+    const m = measureSeries(path);
+    cols = Math.max(cols, m.cols);
+    rows += m.rows;
+  }
+  return { cols, rows };
+}
+
+function measureSeries(els: Element[]): Measure {
+  let cols = 0;
+  let rows = 1;
+  for (const el of els) {
+    const m = measureElement(el);
+    cols += m.cols;
+    rows = Math.max(rows, m.rows);
+  }
+  return { cols: Math.max(cols, 1), rows };
+}
+
+/** Pixel X of the left edge of grid column `col` within a rung. */
+function colX(col: number): number {
+  return PAD + RAIL_W + col * CELL_W;
+}
+
+/** Pixel Y of the centre line of grid row `row` within a rung. */
+function rowY(baseY: number, row: number): number {
+  return baseY + row * CELL_H + CELL_H / 2;
+}
+
+function wireClass(powered: boolean): string {
+  return powered ? "wire live" : "wire";
+}
+
+interface DrawResult {
+  endCol: number;
+  poweredOut: boolean;
+}
+
+class RungPainter {
+  readonly parts: SVGTemplateResult[] = [];
+
+  constructor(
+    private readonly baseY: number,
+    private readonly flow: PowerFlow,
+  ) {}
+
+  private line(x1: number, y1: number, x2: number, y2: number, powered: boolean): void {
+    this.parts.push(
+      svg`<line x1=${x1} y1=${y1} x2=${x2} y2=${y2} class=${wireClass(powered)} />`,
+    );
+  }
+
+  private label(x: number, y: number, text: string, cls: string): void {
+    this.parts.push(svg`<text x=${x} y=${y} class=${cls}>${text}</text>`);
+  }
+
+  drawSeries(els: Element[], col: number, row: number, powered: boolean): DrawResult {
+    let x = col;
+    let live = powered;
+    for (const el of els) {
+      const res = this.drawElement(el, x, row, live);
+      x = res.endCol;
+      live = res.poweredOut;
+    }
+    return { endCol: x, poweredOut: live };
+  }
+
+  private drawElement(el: Element, col: number, row: number, powered: boolean): DrawResult {
+    if (isContact(el)) return this.drawContact(el, col, row, powered);
+    if (isNot(el)) return this.drawNot(el, col, row, powered);
+    return this.drawBranch(el, col, row, powered);
+  }
+
+  private drawContact(
+    el: ContactEl,
+    col: number,
+    row: number,
+    powered: boolean,
+  ): DrawResult {
+    const flow = this.flow.elements.get(el);
+    const live = flow?.live ?? false;
+    const y = rowY(this.baseY, row);
+    const left = colX(col);
+    const right = colX(col + 1);
+    const mid = (left + right) / 2;
+
+    // Wires: incoming coloured by upstream power, outgoing by this element's flow.
+    this.line(left, y, mid - SYMBOL_HALF, y, powered);
+    this.line(mid + SYMBOL_HALF, y, right, y, live);
+
+    const cls = live ? "symbol live" : "symbol";
+    this.parts.push(
+      svg`<line x1=${mid - SYMBOL_HALF} y1=${y - 11} x2=${mid - SYMBOL_HALF} y2=${y + 11} class=${cls} />`,
+    );
+    this.parts.push(
+      svg`<line x1=${mid + SYMBOL_HALF} y1=${y - 11} x2=${mid + SYMBOL_HALF} y2=${y + 11} class=${cls} />`,
+    );
+    if (el.mode === "NC") {
+      this.parts.push(
+        svg`<line x1=${mid - SYMBOL_HALF - 2} y1=${y + 12} x2=${mid + SYMBOL_HALF + 2} y2=${y - 12} class=${cls} />`,
+      );
+    }
+    this.label(mid, y - 16, el.tag, "tag");
+    this.label(mid, y + 22, el.mode ?? "NO", "mode");
+    return { endCol: col + 1, poweredOut: live };
+  }
+
+  private drawNot(el: NotEl, col: number, row: number, powered: boolean): DrawResult {
+    const flow = this.flow.elements.get(el);
+    const live = flow?.live ?? false;
+    // Draw the inner series informationally; the NOT itself carries the power.
+    const res = this.drawSeries(el.not, col, row, powered);
+    const y = rowY(this.baseY, row);
+    const bar = y - 26;
+    this.line(colX(col) + 6, bar, colX(res.endCol) - 6, bar, live);
+    this.label(colX(col) + 12, bar - 4, "NOT", "mode");
+    return { endCol: res.endCol, poweredOut: live };
+  }
+
+  private drawBranch(el: BranchEl, col: number, row: number, powered: boolean): DrawResult {
+    const paths = el.branch;
+    const measure = measureElement(el);
+    const endCol = col + measure.cols;
+    const flow = this.flow.elements.get(el);
+    const branchLive = flow?.live ?? false;
+
+    const rowYs: number[] = [];
+    let r = row;
+    let anyLive = false;
+    for (const path of paths) {
+      const py = rowY(this.baseY, r);
+      rowYs.push(py);
+      const res = this.drawSeries(path, col, r, powered);
+      // Pad the path with a straight wire out to the shared exit column.
+      if (res.endCol < endCol) {
+        this.line(colX(res.endCol), py, colX(endCol), py, res.poweredOut);
+      }
+      anyLive = anyLive || res.poweredOut;
+      r += measureSeries(path).rows;
+    }
+
+    // Vertical buses at entry and exit connecting all path rows.
+    const top = rowYs[0];
+    const bottom = rowYs[rowYs.length - 1];
+    this.line(colX(col), top, colX(col), bottom, powered);
+    this.line(colX(endCol), top, colX(endCol), bottom, anyLive && branchLive);
+    return { endCol, poweredOut: branchLive };
+  }
+}
+
+function renderRung(
+  rung: Rung,
+  baseY: number,
+  flow: PowerFlow,
+  width: number,
+): { part: SVGTemplateResult; height: number } {
+  const measure = measureSeries(rung.series);
+  const painter = new RungPainter(baseY, flow);
+  const baselineY = rowY(baseY, 0);
+
+  // Left rail is always powered; draw the incoming stub.
+  painter.parts.push(
+    svg`<line x1=${PAD} y1=${baseY} x2=${PAD} y2=${baseY + measure.rows * CELL_H} class="rail" />`,
+  );
+  const res = painter.drawSeries(rung.series, 0, 0, true);
+
+  // Wire from the last element to the coils on the right, then the coils.
+  const coilX = Math.max(colX(res.endCol) + 24, width - 120);
+  painter.parts.push(
+    svg`<line x1=${colX(res.endCol)} y1=${baselineY} x2=${coilX} y2=${baselineY} class=${wireClass(res.poweredOut)} />`,
+  );
+  rung.coils.forEach((coil, i) => {
+    const cf = flow.coils.get(coil);
+    const energised = cf?.energised ?? false;
+    const value = cf?.value ?? false;
+    const cy = baselineY + i * 20 - (rung.coils.length - 1) * 10;
+    const cls = energised ? "coil live" : "coil";
+    painter.parts.push(
+      svg`<circle cx=${coilX + 14} cy=${cy} r="10" class=${cls} fill="none" />`,
+    );
+    painter.parts.push(
+      svg`<text x=${coilX + 14} y=${cy - 16} class="tag">${coil.tag}</text>`,
+    );
+    painter.parts.push(
+      svg`<text x=${coilX + 14} y=${cy + 4} class=${value ? "coil-mode live" : "coil-mode"}>${coil.mode ?? "="}</text>`,
+    );
+  });
+
+  const height = measure.rows * CELL_H;
+  return { part: svg`<g>${painter.parts}</g>`, height };
+}
+
+export interface RenderedNetwork {
+  part: SVGTemplateResult;
+  height: number;
+}
+
+export function renderNetwork(
+  network: Network,
+  flow: PowerFlow,
+  width: number,
+): RenderedNetwork {
+  const parts: SVGTemplateResult[] = [];
+  let y = TITLE_H;
+  if (network.title) {
+    parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
+  }
+  for (const rung of network.rungs) {
+    const r = renderRung(rung, y, flow, width);
+    parts.push(r.part);
+    y += r.height + 12;
+  }
+  return { part: svg`<g>${parts}</g>`, height: y + PAD };
+}

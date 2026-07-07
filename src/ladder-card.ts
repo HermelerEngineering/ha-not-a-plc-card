@@ -37,6 +37,7 @@ export class NotAPlcCard extends LitElement {
   @state() private _beat = false;
 
   private _unsub?: () => void;
+  private _beatTimer?: number;
   private _started = false;
 
   setConfig(config: LovelaceCardConfig): void {
@@ -64,7 +65,26 @@ export class NotAPlcCard extends LitElement {
     super.disconnectedCallback();
     this._unsub?.();
     this._unsub = undefined;
+    this._stopHeartbeat();
     this._started = false;
+  }
+
+  private _startHeartbeat(intervalMs: number): void {
+    // The card cannot observe every scan without per-cycle traffic (that flooded
+    // the socket), so blink locally at the configured scan interval as a "the
+    // engine is cycling" cue. Genuine stall detection would need a throttled
+    // server-side liveness tick — a later addition.
+    this._stopHeartbeat();
+    this._beatTimer = window.setInterval(() => {
+      this._beat = !this._beat;
+    }, Math.max(100, intervalMs));
+  }
+
+  private _stopHeartbeat(): void {
+    if (this._beatTimer !== undefined) {
+      window.clearInterval(this._beatTimer);
+      this._beatTimer = undefined;
+    }
   }
 
   private async _start(): Promise<void> {
@@ -78,10 +98,10 @@ export class NotAPlcCard extends LitElement {
       this._unsub = await this.hass.connection.subscribeMessage<{ state: StateImage }>(
         (msg) => {
           this._stateImage = msg.state;
-          this._beat = !this._beat; // toggle the liveness dot each scan
         },
         { type: "not_a_plc/subscribe_state" },
       );
+      this._startHeartbeat(this._program.scan_interval_ms ?? 500);
     } catch (err) {
       this._error = err instanceof Error ? err.message : String(err);
     }

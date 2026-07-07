@@ -34,6 +34,7 @@ export class NotAPlcCard extends LitElement {
   @state() private _program?: Program;
   @state() private _stateImage: StateImage = {};
   @state() private _error?: string;
+  @state() private _beat = false;
 
   private _unsub?: () => void;
   private _started = false;
@@ -77,6 +78,7 @@ export class NotAPlcCard extends LitElement {
       this._unsub = await this.hass.connection.subscribeMessage<{ state: StateImage }>(
         (msg) => {
           this._stateImage = msg.state;
+          this._beat = !this._beat; // toggle the liveness dot each scan
         },
         { type: "not_a_plc/subscribe_state" },
       );
@@ -88,7 +90,10 @@ export class NotAPlcCard extends LitElement {
   protected render(): TemplateResult {
     return html`
       <ha-card .header=${this._config?.title ?? "Not a PLC"}>
-        <div class="content">${this._renderBody()}</div>
+        <div class="content">
+          <div class="heartbeat ${this._beat ? "on" : ""}" title="Scan activity"></div>
+          ${this._renderBody()}
+        </div>
       </ha-card>
     `;
   }
@@ -130,6 +135,24 @@ export class NotAPlcCard extends LitElement {
     .content {
       padding: 8px 12px 16px;
       overflow-x: auto;
+      position: relative;
+    }
+    .heartbeat {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--disabled-text-color, #9e9e9e);
+      opacity: 0.45;
+      transition:
+        background 120ms ease,
+        opacity 120ms ease;
+    }
+    .heartbeat.on {
+      background: var(--success-color, #4caf50);
+      opacity: 1;
     }
     .hint,
     .error {
@@ -172,13 +195,13 @@ export class NotAPlcCard extends LitElement {
     }
     text.tag {
       fill: var(--primary-text-color);
-      font-size: 11px;
+      font-size: 13px;
       text-anchor: middle;
     }
     text.mode,
     text.coil-mode {
       fill: var(--secondary-text-color);
-      font-size: 10px;
+      font-size: 12px;
       text-anchor: middle;
     }
     text.coil-mode.live {
@@ -187,7 +210,7 @@ export class NotAPlcCard extends LitElement {
     }
     text.network-title {
       fill: var(--primary-text-color);
-      font-size: 13px;
+      font-size: 15px;
       font-weight: 600;
     }
   `;

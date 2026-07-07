@@ -25,7 +25,7 @@ import {
 import { PowerFlow } from "./power-flow";
 
 const CELL_W = 88;
-const CELL_H = 48;
+const CELL_H = 56;
 const PAD = 14;
 const TITLE_H = 22;
 const RAIL_W = 10;
@@ -143,8 +143,8 @@ class RungPainter {
         svg`<line x1=${mid - SYMBOL_HALF - 2} y1=${y + 12} x2=${mid + SYMBOL_HALF + 2} y2=${y - 12} class=${cls} />`,
       );
     }
-    this.label(mid, y - 16, el.tag, "tag");
-    this.label(mid, y + 22, el.mode ?? "NO", "mode");
+    this.label(mid, y - 18, el.tag, "tag");
+    this.label(mid, y + 24, el.mode ?? "NO", "mode");
     return { endCol: col + 1, poweredOut: live };
   }
 
@@ -201,9 +201,13 @@ function renderRung(
   const painter = new RungPainter(baseY, flow);
   const baselineY = rowY(baseY, 0);
 
-  // Left rail is always powered; draw the incoming stub.
+  // Left rail is always powered; draw it and a live stub that connects the rail
+  // to the first element (no gap between the rail and the energised wire).
   painter.parts.push(
     svg`<line x1=${PAD} y1=${baseY} x2=${PAD} y2=${baseY + measure.rows * CELL_H} class="rail" />`,
+  );
+  painter.parts.push(
+    svg`<line x1=${PAD} y1=${baselineY} x2=${colX(0)} y2=${baselineY} class="wire live" />`,
   );
   const res = painter.drawSeries(rung.series, 0, 0, true);
 
@@ -216,17 +220,27 @@ function renderRung(
     const cf = flow.coils.get(coil);
     const energised = cf?.energised ?? false;
     const value = cf?.value ?? false;
-    const cy = baselineY + i * 20 - (rung.coils.length - 1) * 10;
+    const cy = baselineY + i * 30 - (rung.coils.length - 1) * 15;
+    const cx = coilX + 18;
     const cls = energised ? "coil live" : "coil";
+    // Wire into the coil, then the coil drawn as a parenthesis pair "( )" as in
+    // common PLC packages. S/R modes show the letter between the parentheses.
     painter.parts.push(
-      svg`<circle cx=${coilX + 14} cy=${cy} r="10" class=${cls} fill="none" />`,
+      svg`<line x1=${coilX} y1=${cy} x2=${cx - 9} y2=${cy} class=${wireClass(energised)} />`,
     );
     painter.parts.push(
-      svg`<text x=${coilX + 14} y=${cy - 16} class="tag">${coil.tag}</text>`,
+      svg`<path d="M ${cx - 6} ${cy - 13} Q ${cx - 15} ${cy} ${cx - 6} ${cy + 13}" class=${cls} fill="none" />`,
     );
     painter.parts.push(
-      svg`<text x=${coilX + 14} y=${cy + 4} class=${value ? "coil-mode live" : "coil-mode"}>${coil.mode ?? "="}</text>`,
+      svg`<path d="M ${cx + 6} ${cy - 13} Q ${cx + 15} ${cy} ${cx + 6} ${cy + 13}" class=${cls} fill="none" />`,
     );
+    painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${coil.tag}</text>`);
+    const mode = coil.mode ?? "=";
+    if (mode !== "=") {
+      painter.parts.push(
+        svg`<text x=${cx} y=${cy + 5} class=${value ? "coil-mode live" : "coil-mode"}>${mode}</text>`,
+      );
+    }
   });
 
   const height = measure.rows * CELL_H;

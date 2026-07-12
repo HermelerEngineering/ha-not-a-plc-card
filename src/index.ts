@@ -11,8 +11,8 @@ const CARD_TYPE = "not-a-plc-card";
 window.customCards = window.customCards ?? [];
 window.customCards.push({
   type: CARD_TYPE,
-  name: "Not a PLC",
-  description: "Read-only live status view of a Not a PLC ladder program.",
+  name: "Not-a-PLC",
+  description: "Read-only live status view of a Not-a-PLC ladder program.",
   preview: false,
 });
 

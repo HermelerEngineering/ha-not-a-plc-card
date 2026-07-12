@@ -1,7 +1,7 @@
 /**
  * Config editor for `not-a-plc-card` — the UI shown in the Lovelace card editor.
  *
- * Lets the user pick which Not a PLC service the card renders (and set a title)
+ * Lets the user pick which Not-a-PLC service the card renders (and set a title)
  * without touching YAML. Services come from `not_a_plc/list_services`. Emits the
  * standard `config-changed` event the card editor listens for.
  */

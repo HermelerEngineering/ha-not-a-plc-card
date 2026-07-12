@@ -1,5 +1,5 @@
 /**
- * TypeScript mirror of the Not a PLC program IR (the canonical model).
+ * TypeScript mirror of the Not-a-PLC program IR (the canonical model).
  *
  * These types describe exactly the dict shape produced by the integration's
  * `Program.to_dict` (see `engine/model.py`). The card is a pure consumer of that
@@ -93,7 +93,7 @@ export interface Program {
 /** Process image pushed by `subscribe_state`: tag name -> value. */
 export type StateImage = Record<string, boolean | number>;
 
-/** One running Not a PLC service, from `list_services`. */
+/** One running Not-a-PLC service, from `list_services`. */
 export interface ServiceInfo {
   entry_id: string;
   name: string;

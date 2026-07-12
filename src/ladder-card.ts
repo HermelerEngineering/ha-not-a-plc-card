@@ -1,5 +1,5 @@
 /**
- * `not-a-plc-card` — a read-only Lovelace card that shows a Not a PLC program
+ * `not-a-plc-card` — a read-only Lovelace card that shows a Not-a-PLC program
  * "flowing" live.
  *
  * On first `hass` it fetches the program once (`not_a_plc/get_program`) and
@@ -123,7 +123,7 @@ export class NotAPlcCard extends LitElement {
 
   protected render(): TemplateResult {
     return html`
-      <ha-card .header=${this._config?.title ?? "Not a PLC"}>
+      <ha-card .header=${this._config?.title ?? "Not-a-PLC"}>
         <div class="content">
           <div class="heartbeat ${this._beat ? "on" : ""}" title="Scan activity"></div>
           ${this._renderBody()}

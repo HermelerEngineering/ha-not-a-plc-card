@@ -1,7 +1,7 @@
-# Not a PLC — status card
+# Not-a-PLC — status card
 
 A read-only [Lovelace](https://www.home-assistant.io/dashboards/) card for the
-[**Not a PLC**](https://github.com/HermelerEngineering/ha-not-a-plc) integration.
+[**Not-a-PLC**](https://github.com/HermelerEngineering/ha-not-a-plc) integration.
 It draws your ladder program and colours the "energised" contacts, wires and
 coils live, so you get the classic PLC *online monitoring* feel on a Home
 Assistant dashboard.
@@ -22,7 +22,7 @@ unit-tested in isolation.
 
 ## Requirements
 
-- The **Not a PLC** integration installed and set up (it exposes the websocket
+- The **Not-a-PLC** integration installed and set up (it exposes the websocket
   API this card consumes).
 
 ## Installation via HACS (custom repository)
@@ -30,7 +30,7 @@ unit-tested in isolation.
 1. In Home Assistant: **HACS → ⋮ (top right) → Custom repositories**.
 2. Repository: `https://github.com/HermelerEngineering/ha-not-a-plc-card`
    — Category: **Dashboard**. Add it.
-3. Open the new **Not a PLC Card** entry and **Download** it. HACS fetches the
+3. Open the new **Not-a-PLC Card** entry and **Download** it. HACS fetches the
    built `not-a-plc-card.js` from the latest release and registers the dashboard
    resource for you.
 4. Add a card of type `custom:not-a-plc-card` to a dashboard:
@@ -38,12 +38,12 @@ unit-tested in isolation.
 ```yaml
 type: custom:not-a-plc-card
 title: Ventilation logic
-# Optional: which Not a PLC service to show. Omit to use the first one.
+# Optional: which Not-a-PLC service to show. Omit to use the first one.
 # Pick it visually in the card editor; this is the service's config entry id.
 service: 1a2b3c...
 ```
 
-If you run several Not a PLC services, choose which one a card shows in the card
+If you run several Not-a-PLC services, choose which one a card shows in the card
 editor's **Service** dropdown (no YAML needed). The heartbeat dot (top-right)
 blinks at the service's scan interval.
 

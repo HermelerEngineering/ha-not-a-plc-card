@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { BranchEl, ContactEl, NotEl, Program, Rung } from "../src/ir";
+import {
+  BranchEl,
+  CompareEl,
+  CompareOp,
+  ContactEl,
+  NotEl,
+  Program,
+  Rung,
+} from "../src/ir";
 import {
   computePowerFlow,
   elementConducts,
@@ -44,6 +52,25 @@ describe("elementConducts", () => {
     const not: NotEl = { not: [NO("a")] };
     expect(elementConducts(not, { a: true })).toBe(false);
     expect(elementConducts(not, { a: false })).toBe(true);
+  });
+
+  it("evaluates comparators like the engine", () => {
+    const cmp = (op: CompareOp, left: string, right: number | string): CompareEl => ({
+      type: "compare",
+      op,
+      left,
+      right,
+    });
+    // constant operand
+    expect(elementConducts(cmp("GT", "t", 21), { t: 22 })).toBe(true);
+    expect(elementConducts(cmp("GT", "t", 21), { t: 21 })).toBe(false);
+    expect(elementConducts(cmp("LE", "t", 21), { t: 21 })).toBe(true);
+    // tag operand
+    expect(elementConducts(cmp("GT", "t", "sp"), { t: 22, sp: 21 })).toBe(true);
+    expect(elementConducts(cmp("GT", "t", "sp"), { t: 20, sp: 21 })).toBe(false);
+    // missing / non-numeric operand does not conduct
+    expect(elementConducts(cmp("GT", "t", "sp"), { t: 22 })).toBe(false);
+    expect(elementConducts(cmp("GT", "t", 21), { t: true })).toBe(false);
   });
 });
 

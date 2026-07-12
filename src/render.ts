@@ -14,15 +14,27 @@ import { SVGTemplateResult, svg } from "lit";
 
 import {
   BranchEl,
+  CompareEl,
+  CompareOp,
   ContactEl,
   Element,
   Network,
   NotEl,
   Rung,
+  isCompare,
   isContact,
   isNot,
 } from "./ir";
 import { PowerFlow } from "./power-flow";
+
+const OP_SYMBOL: Record<CompareOp, string> = {
+  GT: ">",
+  GE: "≥",
+  LT: "<",
+  LE: "≤",
+  EQ: "=",
+  NE: "≠",
+};
 
 const CELL_W = 88;
 const CELL_H = 56;
@@ -38,6 +50,7 @@ interface Measure {
 
 function measureElement(el: Element): Measure {
   if (isContact(el)) return { cols: 1, rows: 1 };
+  if (isCompare(el)) return { cols: 1, rows: 1 };
   if (isNot(el)) return measureSeries(el.not);
   let cols = 1;
   let rows = 0;
@@ -110,8 +123,37 @@ class RungPainter {
 
   private drawElement(el: Element, col: number, row: number, powered: boolean): DrawResult {
     if (isContact(el)) return this.drawContact(el, col, row, powered);
+    if (isCompare(el)) return this.drawCompare(el, col, row, powered);
     if (isNot(el)) return this.drawNot(el, col, row, powered);
     return this.drawBranch(el, col, row, powered);
+  }
+
+  private drawCompare(
+    el: CompareEl,
+    col: number,
+    row: number,
+    powered: boolean,
+  ): DrawResult {
+    const flow = this.flow.elements.get(el);
+    const live = flow?.live ?? false;
+    const y = rowY(this.baseY, row);
+    const left = colX(col);
+    const right = colX(col + 1);
+    const mid = (left + right) / 2;
+    const boxW = 58;
+    const boxH = 26;
+
+    this.line(left, y, mid - boxW / 2, y, powered);
+    this.line(mid + boxW / 2, y, right, y, live);
+
+    const cls = live ? "symbol live" : "symbol";
+    this.parts.push(
+      svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+    );
+    // Tag being compared above; operator + operand inside the box.
+    this.label(mid, y - 20, el.left, "tag");
+    this.label(mid, y + 4, `${OP_SYMBOL[el.op]} ${el.right}`, "compare-text");
+    return { endCol: col + 1, poweredOut: live };
   }
 
   private drawContact(

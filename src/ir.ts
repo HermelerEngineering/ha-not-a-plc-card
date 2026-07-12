@@ -10,6 +10,7 @@ export type TagKind = "input" | "coil" | "memory";
 export type TagType = "BOOL" | "REAL" | "TIME";
 export type ContactMode = "NO" | "NC";
 export type CoilMode = "=" | "S" | "R";
+export type CompareOp = "GT" | "GE" | "LT" | "LE" | "EQ" | "NE";
 
 export interface WritesBinding {
   target: string;
@@ -41,7 +42,15 @@ export interface NotEl {
   not: Element[];
 }
 
-export type Element = ContactEl | BranchEl | NotEl;
+export interface CompareEl {
+  type: "compare";
+  op: CompareOp;
+  left: string;
+  /** Numeric constant, or the name of another REAL tag. */
+  right: number | string;
+}
+
+export type Element = ContactEl | BranchEl | NotEl | CompareEl;
 
 export interface Coil {
   type: "coil";
@@ -90,4 +99,8 @@ export function isBranch(el: Element): el is BranchEl {
 
 export function isNot(el: Element): el is NotEl {
   return Array.isArray((el as NotEl).not);
+}
+
+export function isCompare(el: Element): el is CompareEl {
+  return (el as CompareEl).type === "compare";
 }

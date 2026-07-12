@@ -232,6 +232,11 @@ export class NotAPlcCard extends LitElement {
       font-size: 13px;
       text-anchor: middle;
     }
+    text.compare-text {
+      fill: var(--primary-text-color);
+      font-size: 12px;
+      text-anchor: middle;
+    }
     text.mode,
     text.coil-mode {
       fill: var(--secondary-text-color);

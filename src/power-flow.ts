@@ -18,14 +18,38 @@
 
 import {
   Coil,
+  CompareEl,
+  CompareOp,
   Element,
   Program,
   Rung,
   StateImage,
   isBranch,
+  isCompare,
   isContact,
   isNot,
 } from "./ir";
+
+const COMPARATORS: Record<CompareOp, (a: number, b: number) => boolean> = {
+  GT: (a, b) => a > b,
+  GE: (a, b) => a >= b,
+  LT: (a, b) => a < b,
+  LE: (a, b) => a <= b,
+  EQ: (a, b) => a === b,
+  NE: (a, b) => a !== b,
+};
+
+function asNumber(value: boolean | number | undefined): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function compareConducts(el: CompareEl, state: StateImage): boolean {
+  const left = asNumber(state[el.left]);
+  const right =
+    typeof el.right === "number" ? el.right : asNumber(state[el.right]);
+  if (left === null || right === null) return false;
+  return COMPARATORS[el.op](left, right);
+}
 
 export interface ElementFlow {
   /** Does this element conduct on its own terms (ignoring upstream power)? */
@@ -67,6 +91,7 @@ function contactConducts(tag: string, mode: string | undefined, state: StateImag
 /** Whether an element conducts, ignoring upstream power (engine semantics). */
 export function elementConducts(el: Element, state: StateImage): boolean {
   if (isContact(el)) return contactConducts(el.tag, el.mode, state);
+  if (isCompare(el)) return compareConducts(el, state);
   if (isNot(el)) return !seriesConducts(el.not, state);
   return el.branch.some((path) => seriesConducts(path, state));
 }

@@ -144,10 +144,14 @@ export class NotAPlcCard extends LitElement {
     }
 
     const flow = computePowerFlow(this._program, this._stateImage);
+    const fbTypes: Record<string, string> = {};
+    for (const [name, fb] of Object.entries(this._program.fbs ?? {})) {
+      fbTypes[name] = fb.type;
+    }
     const groups: SVGTemplateResult[] = [];
     let y = 0;
     for (const network of this._program.networks) {
-      const rendered = renderNetwork(network, flow, VIEW_WIDTH);
+      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbTypes);
       groups.push(svg`<g transform="translate(0, ${y})">${rendered.part}</g>`);
       y += rendered.height;
     }
@@ -235,6 +239,12 @@ export class NotAPlcCard extends LitElement {
     text.compare-text {
       fill: var(--primary-text-color);
       font-size: 12px;
+      text-anchor: middle;
+    }
+    text.fb-text {
+      fill: var(--primary-text-color);
+      font-size: 11px;
+      font-weight: 600;
       text-anchor: middle;
     }
     text.mode,

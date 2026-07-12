@@ -27,6 +27,7 @@ import {
   isBranch,
   isCompare,
   isContact,
+  isFb,
   isNot,
 } from "./ir";
 
@@ -92,6 +93,9 @@ function contactConducts(tag: string, mode: string | undefined, state: StateImag
 export function elementConducts(el: Element, state: StateImage): boolean {
   if (isContact(el)) return contactConducts(el.tag, el.mode, state);
   if (isCompare(el)) return compareConducts(el, state);
+  // A function block conducts on its output Q, which the server publishes in the
+  // state image under the instance name (the card cannot recompute stateful Q).
+  if (isFb(el)) return truthy(state[el.instance]);
   if (isNot(el)) return !seriesConducts(el.not, state);
   return el.branch.some((path) => seriesConducts(path, state));
 }

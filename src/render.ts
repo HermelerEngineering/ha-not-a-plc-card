@@ -18,11 +18,13 @@ import {
   CompareOp,
   ContactEl,
   Element,
+  FbRefEl,
   Network,
   NotEl,
   Rung,
   isCompare,
   isContact,
+  isFb,
   isNot,
 } from "./ir";
 import { PowerFlow } from "./power-flow";
@@ -51,6 +53,7 @@ interface Measure {
 function measureElement(el: Element): Measure {
   if (isContact(el)) return { cols: 1, rows: 1 };
   if (isCompare(el)) return { cols: 1, rows: 1 };
+  if (isFb(el)) return { cols: 1, rows: 1 };
   if (isNot(el)) return measureSeries(el.not);
   let cols = 1;
   let rows = 0;
@@ -98,6 +101,7 @@ class RungPainter {
   constructor(
     private readonly baseY: number,
     private readonly flow: PowerFlow,
+    private readonly fbTypes: Record<string, string>,
   ) {}
 
   private line(x1: number, y1: number, x2: number, y2: number, powered: boolean): void {
@@ -124,8 +128,37 @@ class RungPainter {
   private drawElement(el: Element, col: number, row: number, powered: boolean): DrawResult {
     if (isContact(el)) return this.drawContact(el, col, row, powered);
     if (isCompare(el)) return this.drawCompare(el, col, row, powered);
+    if (isFb(el)) return this.drawFb(el, col, row, powered);
     if (isNot(el)) return this.drawNot(el, col, row, powered);
     return this.drawBranch(el, col, row, powered);
+  }
+
+  private drawFb(
+    el: FbRefEl,
+    col: number,
+    row: number,
+    powered: boolean,
+  ): DrawResult {
+    const flow = this.flow.elements.get(el);
+    const live = flow?.live ?? false;
+    const y = rowY(this.baseY, row);
+    const left = colX(col);
+    const right = colX(col + 1);
+    const mid = (left + right) / 2;
+    const boxW = 66;
+    const boxH = 30;
+
+    this.line(left, y, mid - boxW / 2, y, powered);
+    this.line(mid + boxW / 2, y, right, y, live);
+
+    const cls = live ? "symbol live" : "symbol";
+    this.parts.push(
+      svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+    );
+    // Instance name above, block type inside the box.
+    this.label(mid, y - 22, el.instance, "tag");
+    this.label(mid, y + 4, this.fbTypes[el.instance] ?? "FB", "fb-text");
+    return { endCol: col + 1, poweredOut: live };
   }
 
   private drawCompare(
@@ -238,9 +271,10 @@ function renderRung(
   baseY: number,
   flow: PowerFlow,
   width: number,
+  fbTypes: Record<string, string>,
 ): { part: SVGTemplateResult; height: number } {
   const measure = measureSeries(rung.series);
-  const painter = new RungPainter(baseY, flow);
+  const painter = new RungPainter(baseY, flow, fbTypes);
   const baselineY = rowY(baseY, 0);
 
   // Left rail is always powered; draw it and a live stub that connects the rail
@@ -298,6 +332,7 @@ export function renderNetwork(
   network: Network,
   flow: PowerFlow,
   width: number,
+  fbTypes: Record<string, string>,
 ): RenderedNetwork {
   const parts: SVGTemplateResult[] = [];
   let y = TITLE_H;
@@ -305,7 +340,7 @@ export function renderNetwork(
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
   for (const rung of network.rungs) {
-    const r = renderRung(rung, y, flow, width);
+    const r = renderRung(rung, y, flow, width, fbTypes);
     parts.push(r.part);
     y += r.height + 12;
   }

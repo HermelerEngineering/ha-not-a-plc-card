@@ -5,6 +5,7 @@ import {
   CompareEl,
   CompareOp,
   ContactEl,
+  FbRefEl,
   NotEl,
   Program,
   Rung,
@@ -71,6 +72,13 @@ describe("elementConducts", () => {
     // missing / non-numeric operand does not conduct
     expect(elementConducts(cmp("GT", "t", "sp"), { t: 22 })).toBe(false);
     expect(elementConducts(cmp("GT", "t", 21), { t: true })).toBe(false);
+  });
+
+  it("conducts a function block on its published Q from state", () => {
+    const fb: FbRefEl = { type: "fb", instance: "e1" };
+    expect(elementConducts(fb, { e1: true })).toBe(true);
+    expect(elementConducts(fb, { e1: false })).toBe(false);
+    expect(elementConducts(fb, {})).toBe(false);
   });
 });
 

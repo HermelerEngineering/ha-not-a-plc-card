@@ -50,7 +50,13 @@ export interface CompareEl {
   right: number | string;
 }
 
-export type Element = ContactEl | BranchEl | NotEl | CompareEl;
+export interface FbRefEl {
+  type: "fb";
+  /** Name of a function-block instance declared in `Program.fbs`. */
+  instance: string;
+}
+
+export type Element = ContactEl | BranchEl | NotEl | CompareEl | FbRefEl;
 
 export interface Coil {
   type: "coil";
@@ -71,10 +77,16 @@ export interface Network {
   title?: string;
 }
 
+export interface FunctionBlockDef {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface Program {
   meta?: Record<string, unknown>;
   scan_interval_ms?: number;
   tags: Record<string, TagDef>;
+  fbs?: Record<string, FunctionBlockDef>;
   networks: Network[];
 }
 
@@ -103,4 +115,8 @@ export function isNot(el: Element): el is NotEl {
 
 export function isCompare(el: Element): el is CompareEl {
   return (el as CompareEl).type === "compare";
+}
+
+export function isFb(el: Element): el is FbRefEl {
+  return (el as FbRefEl).type === "fb";
 }

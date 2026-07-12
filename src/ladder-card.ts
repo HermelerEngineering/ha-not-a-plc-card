@@ -8,15 +8,7 @@
  * monitor — it never writes.
  */
 
-import {
-  LitElement,
-  PropertyValues,
-  SVGTemplateResult,
-  TemplateResult,
-  css,
-  html,
-  svg,
-} from "lit";
+import { LitElement, SVGTemplateResult, TemplateResult, css, html, svg } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import { HomeAssistant, LovelaceCardConfig } from "./ha";
@@ -38,7 +30,8 @@ export class NotAPlcCard extends LitElement {
 
   private _unsub?: () => void;
   private _beatTimer?: number;
-  private _started = false;
+  // Key of the service we last (re)started for; undefined = not started yet.
+  private _startedKey?: string;
 
   setConfig(config: LovelaceCardConfig): void {
     this._config = config;
@@ -50,13 +43,25 @@ export class NotAPlcCard extends LitElement {
     return Math.max(3, rungs + 1);
   }
 
+  static getConfigElement(): HTMLElement {
+    return document.createElement("not-a-plc-card-editor");
+  }
+
   static getStubConfig(): LovelaceCardConfig {
     return { type: "custom:not-a-plc-card" };
   }
 
-  protected updated(changed: PropertyValues): void {
-    if (changed.has("hass") && this.hass && !this._started) {
-      this._started = true;
+  private _serviceId(): string | undefined {
+    const service = this._config?.service;
+    return typeof service === "string" && service ? service : undefined;
+  }
+
+  protected updated(): void {
+    if (!this.hass) return;
+    // (Re)start whenever the selected service changes (or on first hass).
+    const key = this._serviceId() ?? "";
+    if (this._startedKey !== key) {
+      this._startedKey = key;
       void this._start();
     }
   }
@@ -66,7 +71,7 @@ export class NotAPlcCard extends LitElement {
     this._unsub?.();
     this._unsub = undefined;
     this._stopHeartbeat();
-    this._started = false;
+    this._startedKey = undefined;
   }
 
   private _startHeartbeat(intervalMs: number): void {
@@ -89,17 +94,26 @@ export class NotAPlcCard extends LitElement {
 
   private async _start(): Promise<void> {
     if (!this.hass) return;
+    // Tear down any previous subscription (e.g. when the selected service changes).
+    this._unsub?.();
+    this._unsub = undefined;
+    this._stopHeartbeat();
+
+    const entryId = this._serviceId();
+    const target: Record<string, unknown> = entryId ? { entry_id: entryId } : {};
     try {
       const res = await this.hass.connection.sendMessagePromise<{ program: Program }>({
         type: "not_a_plc/get_program",
+        ...target,
       });
       this._program = res.program;
+      this._stateImage = {};
       this._error = undefined;
       this._unsub = await this.hass.connection.subscribeMessage<{ state: StateImage }>(
         (msg) => {
           this._stateImage = msg.state;
         },
-        { type: "not_a_plc/subscribe_state" },
+        { type: "not_a_plc/subscribe_state", ...target },
       );
       this._startHeartbeat(this._program.scan_interval_ms ?? 500);
     } catch (err) {

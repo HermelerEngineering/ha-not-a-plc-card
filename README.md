@@ -38,7 +38,14 @@ unit-tested in isolation.
 ```yaml
 type: custom:not-a-plc-card
 title: Ventilation logic
+# Optional: which Not a PLC service to show. Omit to use the first one.
+# Pick it visually in the card editor; this is the service's config entry id.
+service: 1a2b3c...
 ```
+
+If you run several Not a PLC services, choose which one a card shows in the card
+editor's **Service** dropdown (no YAML needed). The heartbeat dot (top-right)
+blinks at the service's scan interval.
 
 HACS installs the file attached to a GitHub **release** (built by the release
 workflow), so make sure the repository has at least one release — see below.

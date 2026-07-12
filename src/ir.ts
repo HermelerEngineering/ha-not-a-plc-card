@@ -72,6 +72,12 @@ export interface Program {
 /** Process image pushed by `subscribe_state`: tag name -> value. */
 export type StateImage = Record<string, boolean | number>;
 
+/** One running Not a PLC service, from `list_services`. */
+export interface ServiceInfo {
+  entry_id: string;
+  name: string;
+}
+
 // --- Narrowing helpers ------------------------------------------------------
 
 export function isContact(el: Element): el is ContactEl {

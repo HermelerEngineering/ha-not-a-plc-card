@@ -6,11 +6,16 @@
  * package. This keeps the build light and the surface explicit.
  */
 
+export interface HaMessage {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface HaConnection {
-  sendMessagePromise<T>(message: { type: string }): Promise<T>;
+  sendMessagePromise<T>(message: HaMessage): Promise<T>;
   subscribeMessage<T>(
     callback: (message: T) => void,
-    subscribeMessage: { type: string },
+    subscribeMessage: HaMessage,
   ): Promise<() => void>;
 }
 

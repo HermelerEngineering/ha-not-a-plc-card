@@ -4,6 +4,7 @@
  */
 
 import "./ladder-card";
+import "./editor";
 
 const CARD_TYPE = "not-a-plc-card";
 

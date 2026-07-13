@@ -1,17 +1,17 @@
 /**
- * `not-a-plc-panel` — the full-page editor panel (phase 4.1 scaffold).
+ * `not-a-plc-panel` — the full-page editor panel.
  *
  * Registered as a Home Assistant sidebar panel by the integration (`panel_custom`
  * pointing at this bundle). It:
  *   - lists the running services and lets you pick one,
- *   - shows a structural preview of that service's program (reusing the card's
- *     render / power-flow layer),
- *   - lets you edit the program as lossless DSL text and save it back
- *     (`save_program_text` → validate → `.storage` → reload).
+ *   - shows a LIVE preview of that service's program (reusing the card's render /
+ *     power-flow layer, coloured by a `subscribe_state` stream),
+ *   - lets you bind each input tag to an entity via the native HA entity picker
+ *     (phase 4.2) and save (`save_program`),
+ *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
- * The structured (form/drag) editing lands in later 4.x sub-phases; this proves
- * the panel ↔ get/save pipeline and is already useful (edit in the UI, no
- * `.storage` fiddling).
+ * Structured add/remove of tags and elements, and the drag-drop canvas, land in
+ * later 4.x sub-phases.
  */
 
 import {
@@ -25,11 +25,14 @@ import {
 import { customElement, property, state } from "lit/decorators.js";
 
 import { HomeAssistant } from "./ha";
-import { Program, ServiceInfo } from "./ir";
+import { Program, ServiceInfo, StateImage, TagDef } from "./ir";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
 
 const VIEW_WIDTH = 720;
+
+// Domains offered by the entity picker per tag type (see project-plan §3a).
+const REAL_DOMAINS = ["sensor", "input_number", "number"];
 
 @customElement("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
@@ -39,9 +42,12 @@ export class NotAPlcPanel extends LitElement {
   @state() private _services: ServiceInfo[] = [];
   @state() private _service = "";
   @state() private _program?: Program;
+  @state() private _stateImage: StateImage = {};
   @state() private _text = "";
   @state() private _status = "";
   @state() private _loaded = false;
+
+  private _unsub?: () => void;
 
   protected updated(): void {
     if (this.hass && !this._loaded) {
@@ -50,9 +56,16 @@ export class NotAPlcPanel extends LitElement {
     }
   }
 
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._unsub?.();
+    this._unsub = undefined;
+  }
+
   private async _init(): Promise<void> {
     await this._loadServices();
     await this._loadProgram();
+    await this._subscribe();
   }
 
   private _target(): Record<string, unknown> {
@@ -95,12 +108,59 @@ export class NotAPlcPanel extends LitElement {
     }
   }
 
-  private async _onService(e: Event): Promise<void> {
-    this._service = (e.target as HTMLSelectElement).value;
-    await this._loadProgram();
+  private async _subscribe(): Promise<void> {
+    const conn = this.hass?.connection;
+    if (!conn) return;
+    this._unsub?.();
+    this._unsub = undefined;
+    try {
+      this._unsub = await conn.subscribeMessage<{ state: StateImage }>(
+        (msg) => {
+          this._stateImage = msg.state;
+        },
+        { type: "not_a_plc/subscribe_state", ...this._target() },
+      );
+    } catch {
+      this._stateImage = {};
+    }
   }
 
-  private async _save(): Promise<void> {
+  private async _onService(e: Event): Promise<void> {
+    this._service = (e.target as HTMLSelectElement).value;
+    this._stateImage = {};
+    await this._loadProgram();
+    await this._subscribe();
+  }
+
+  private _setSource(name: string, value: string): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    const updated: TagDef = { ...tag, source: value || undefined };
+    this._program = {
+      ...this._program,
+      tags: { ...this._program.tags, [name]: updated },
+    };
+    this._status = "Unsaved changes.";
+  }
+
+  private async _saveProgram(): Promise<void> {
+    const conn = this.hass?.connection;
+    if (!conn || !this._program) return;
+    this._status = "Saving…";
+    try {
+      await conn.sendMessagePromise({
+        type: "not_a_plc/save_program",
+        ...this._target(),
+        program: this._program,
+      });
+      this._status = "Saved.";
+      await this._loadProgram();
+    } catch (err) {
+      this._status = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private async _saveText(): Promise<void> {
     const conn = this.hass?.connection;
     if (!conn) return;
     const textarea = this.renderRoot.querySelector("textarea");
@@ -115,8 +175,7 @@ export class NotAPlcPanel extends LitElement {
       this._status = "Saved.";
       await this._loadProgram();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this._status = `Error: ${message}`;
+      this._status = `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
@@ -138,18 +197,65 @@ export class NotAPlcPanel extends LitElement {
               </option>`,
           )}
         </select>
+        <span class="status">${this._status}</span>
       </div>
       <div class="body">
         <section class="preview">${this._renderPreview()}</section>
         <section class="edit">
-          <label>Program (text DSL)</label>
-          <textarea spellcheck="false" .value=${this._text}></textarea>
-          <div class="actions">
-            <button @click=${this._save}>Save</button>
-            <span class="status">${this._status}</span>
-          </div>
+          ${this._renderTags()}
+          <details>
+            <summary>Advanced: edit as text (DSL)</summary>
+            <textarea spellcheck="false" .value=${this._text}></textarea>
+            <button @click=${this._saveText}>Save text</button>
+          </details>
         </section>
       </div>
+    `;
+  }
+
+  private _renderTags(): TemplateResult {
+    if (!this._program) return html`<div class="hint">Loading…</div>`;
+    const entries = Object.entries(this._program.tags);
+    return html`
+      <div class="tags-header">
+        <h3>Tags</h3>
+        <button @click=${this._saveProgram}>Save</button>
+      </div>
+      <table class="tags">
+        <thead>
+          <tr><th>Name</th><th>Kind</th><th>Type</th><th>Binding</th></tr>
+        </thead>
+        <tbody>
+          ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
+        </tbody>
+      </table>
+    `;
+  }
+
+  private _renderTagRow(name: string, tag: TagDef): TemplateResult {
+    return html`
+      <tr>
+        <td>${name}</td>
+        <td>${tag.kind}</td>
+        <td>${tag.type ?? "BOOL"}</td>
+        <td>${this._renderBinding(name, tag)}</td>
+      </tr>
+    `;
+  }
+
+  private _renderBinding(name: string, tag: TagDef): TemplateResult {
+    if (tag.kind !== "input") {
+      return html`<span class="muted">—</span>`;
+    }
+    const domains = tag.type === "REAL" ? REAL_DOMAINS : undefined;
+    return html`
+      <ha-entity-picker
+        .hass=${this.hass}
+        .value=${tag.source ?? ""}
+        .includeDomains=${domains}
+        allow-custom-entity
+        @value-changed=${(e: CustomEvent) => this._setSource(name, e.detail.value)}
+      ></ha-entity-picker>
     `;
   }
 
@@ -158,12 +264,12 @@ export class NotAPlcPanel extends LitElement {
     if (this._program.networks.length === 0) {
       return html`<div class="hint">This program has no networks.</div>`;
     }
-    const flow = computePowerFlow(this._program, {});
+    const flow = computePowerFlow(this._program, this._stateImage);
     const fbs = this._program.fbs ?? {};
     const groups: SVGTemplateResult[] = [];
     let y = 0;
     for (const network of this._program.networks) {
-      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbs, {});
+      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbs, this._stateImage);
       groups.push(svg`<g transform="translate(0, ${y})">${rendered.part}</g>`);
       y += rendered.height;
     }
@@ -194,6 +300,10 @@ export class NotAPlcPanel extends LitElement {
       font-size: 20px;
       font-weight: 500;
       flex: 1;
+    }
+    .status {
+      font-size: 0.9em;
+      opacity: 0.9;
     }
     select,
     textarea,
@@ -226,24 +336,45 @@ export class NotAPlcPanel extends LitElement {
       padding: 12px;
       overflow-x: auto;
     }
-    .edit {
+    .tags-header {
       display: flex;
-      flex-direction: column;
-      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
     }
-    label {
-      font-size: 0.85em;
+    h3 {
+      margin: 4px 0 8px;
+    }
+    table.tags {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    table.tags th,
+    table.tags td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--divider-color, #eee);
+      vertical-align: middle;
+    }
+    table.tags th {
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+    }
+    .muted {
+      color: var(--secondary-text-color);
+    }
+    details {
+      margin-top: 12px;
+    }
+    summary {
+      cursor: pointer;
       color: var(--secondary-text-color);
     }
     textarea {
-      min-height: 320px;
+      width: 100%;
+      min-height: 240px;
+      margin: 8px 0;
       font-family: var(--code-font-family, monospace);
       white-space: pre;
-    }
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
     }
     button {
       cursor: pointer;
@@ -252,14 +383,10 @@ export class NotAPlcPanel extends LitElement {
       border: none;
       padding: 8px 16px;
     }
-    .status {
-      color: var(--secondary-text-color);
-    }
     .hint {
       color: var(--secondary-text-color);
       padding: 16px;
     }
-    /* energised colours match the card */
     .rail {
       stroke: var(--primary-text-color);
       stroke-width: 2;

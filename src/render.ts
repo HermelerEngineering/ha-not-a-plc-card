@@ -19,9 +19,11 @@ import {
   ContactEl,
   Element,
   FbRefEl,
+  FunctionBlockDef,
   Network,
   NotEl,
   Rung,
+  StateImage,
   isCompare,
   isContact,
   isFb,
@@ -37,6 +39,12 @@ const OP_SYMBOL: Record<CompareOp, string> = {
   EQ: "=",
   NE: "≠",
 };
+
+/** Format a live process-image value for display, or null if not a number. */
+function fmtNumber(value: boolean | number | undefined): string | null {
+  if (typeof value !== "number") return null;
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
 
 const CELL_W = 88;
 const CELL_H = 56;
@@ -101,7 +109,8 @@ class RungPainter {
   constructor(
     private readonly baseY: number,
     private readonly flow: PowerFlow,
-    private readonly fbTypes: Record<string, string>,
+    private readonly fbs: Record<string, FunctionBlockDef>,
+    private readonly state: StateImage,
   ) {}
 
   private line(x1: number, y1: number, x2: number, y2: number, powered: boolean): void {
@@ -155,9 +164,15 @@ class RungPainter {
     this.parts.push(
       svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
     );
-    // Instance name above, block type inside the box.
+    // Instance name above, block type inside; counters also show CV/PV below.
+    const def = this.fbs[el.instance];
     this.label(mid, y - 22, el.instance, "tag");
-    this.label(mid, y + 4, this.fbTypes[el.instance] ?? "FB", "fb-text");
+    this.label(mid, y + 4, def?.type ?? "FB", "fb-text");
+    const cv = fmtNumber(this.state[`${el.instance}.CV`]);
+    if (cv !== null) {
+      const pv = def && typeof def.pv === "number" ? def.pv : undefined;
+      this.label(mid, y + 20, pv !== undefined ? `${cv}/${pv}` : cv, "compare-text");
+    }
     return { endCol: col + 1, poweredOut: live };
   }
 
@@ -183,9 +198,16 @@ class RungPainter {
     this.parts.push(
       svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
     );
-    // Tag being compared above; operator + operand inside the box.
-    this.label(mid, y - 20, el.left, "tag");
-    this.label(mid, y + 4, `${OP_SYMBOL[el.op]} ${el.right}`, "compare-text");
+    // Left operand (with its live value) above; operator + right operand inside.
+    const leftVal = fmtNumber(this.state[el.left]);
+    const leftLabel = leftVal !== null ? `${el.left} = ${leftVal}` : el.left;
+    this.label(mid, y - 20, leftLabel, "tag");
+    let rightLabel = String(el.right);
+    if (typeof el.right === "string") {
+      const rv = fmtNumber(this.state[el.right]);
+      if (rv !== null) rightLabel = `${el.right}=${rv}`;
+    }
+    this.label(mid, y + 4, `${OP_SYMBOL[el.op]} ${rightLabel}`, "compare-text");
     return { endCol: col + 1, poweredOut: live };
   }
 
@@ -271,10 +293,11 @@ function renderRung(
   baseY: number,
   flow: PowerFlow,
   width: number,
-  fbTypes: Record<string, string>,
+  fbs: Record<string, FunctionBlockDef>,
+  state: StateImage,
 ): { part: SVGTemplateResult; height: number } {
   const measure = measureSeries(rung.series);
-  const painter = new RungPainter(baseY, flow, fbTypes);
+  const painter = new RungPainter(baseY, flow, fbs, state);
   const baselineY = rowY(baseY, 0);
 
   // Left rail is always powered; draw it and a live stub that connects the rail
@@ -332,7 +355,8 @@ export function renderNetwork(
   network: Network,
   flow: PowerFlow,
   width: number,
-  fbTypes: Record<string, string>,
+  fbs: Record<string, FunctionBlockDef>,
+  state: StateImage,
 ): RenderedNetwork {
   const parts: SVGTemplateResult[] = [];
   let y = TITLE_H;
@@ -340,7 +364,7 @@ export function renderNetwork(
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
   for (const rung of network.rungs) {
-    const r = renderRung(rung, y, flow, width, fbTypes);
+    const r = renderRung(rung, y, flow, width, fbs, state);
     parts.push(r.part);
     y += r.height + 12;
   }

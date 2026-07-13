@@ -159,14 +159,11 @@ export class NotAPlcPanel extends LitElement {
       return html`<div class="hint">This program has no networks.</div>`;
     }
     const flow = computePowerFlow(this._program, {});
-    const fbTypes: Record<string, string> = {};
-    for (const [name, fb] of Object.entries(this._program.fbs ?? {})) {
-      fbTypes[name] = fb.type;
-    }
+    const fbs = this._program.fbs ?? {};
     const groups: SVGTemplateResult[] = [];
     let y = 0;
     for (const network of this._program.networks) {
-      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbTypes);
+      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbs, {});
       groups.push(svg`<g transform="translate(0, ${y})">${rendered.part}</g>`);
       y += rendered.height;
     }

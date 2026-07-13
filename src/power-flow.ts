@@ -130,7 +130,11 @@ function flowElement(
   out: Map<Element, ElementFlow>,
 ): boolean {
   const conducts = elementConducts(el, state);
-  const live = poweredIn && conducts;
+  // A function block's output is its Q, which can outlive the incoming power (a
+  // running timer, a set latch, a reached counter). The engine sets the rung
+  // power to Q, so the block and everything downstream follow Q — not
+  // poweredIn && Q. Stateless elements gate on the incoming power as usual.
+  const live = isFb(el) ? conducts : poweredIn && conducts;
   out.set(el, { conducts, live });
 
   if (isBranch(el)) {

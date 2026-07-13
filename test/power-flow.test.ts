@@ -157,4 +157,20 @@ describe("computePowerFlow", () => {
 
     expect(flow.coils.get(rung.coils[0])).toEqual({ energised: false, value: true });
   });
+
+  it("colours a function block on its Q even after its input power drops", () => {
+    const fb: FbRefEl = { type: "fb", instance: "t" };
+    const rung: Rung = {
+      id: "r",
+      series: [NO("a"), fb],
+      coils: [{ type: "coil", tag: "out" }],
+    };
+    // 'a' is low now (the input pulse is gone), but the block's Q is still true
+    // (e.g. a running TP, a set latch, a reached counter). The engine keeps the
+    // rung power at Q, so the block and everything downstream stay live.
+    const flow = computePowerFlow(program([rung]), { a: false, t: true });
+    expect(flow.elements.get(fb)?.live).toBe(true);
+    expect(flow.rungs.get(rung)?.result).toBe(true);
+    expect(flow.coils.get(rung.coils[0])?.energised).toBe(true);
+  });
 });

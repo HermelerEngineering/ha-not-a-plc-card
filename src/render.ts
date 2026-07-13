@@ -171,7 +171,8 @@ class RungPainter {
     const cv = fmtNumber(this.state[`${el.instance}.CV`]);
     if (cv !== null) {
       const pv = def && typeof def.pv === "number" ? def.pv : undefined;
-      this.label(mid, y + 20, pv !== undefined ? `${cv}/${pv}` : cv, "compare-text");
+      // Below the box (its bottom is at y + boxH/2 = y + 15), not over the edge.
+      this.label(mid, y + 27, pv !== undefined ? `${cv}/${pv}` : cv, "compare-text");
     }
     return { endCol: col + 1, poweredOut: live };
   }

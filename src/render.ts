@@ -7,7 +7,10 @@
  * follows the Home Assistant theme.
  *
  * This module owns only presentation; all truth about what is energised comes
- * from `computePowerFlow` (see power-flow.ts).
+ * from `computePowerFlow` (see power-flow.ts). Condition *symbols* (contacts,
+ * compares) are coloured by their own conduct state, so a satisfied condition
+ * shows even when an upstream break stopped power reaching it; the *wires* between
+ * elements follow actual power flow, so the line still visibly stops at the break.
  */
 
 import { SVGTemplateResult, svg } from "lit";
@@ -185,6 +188,7 @@ class RungPainter {
   ): DrawResult {
     const flow = this.flow.elements.get(el);
     const live = flow?.live ?? false;
+    const conducts = flow?.conducts ?? false;
     const y = rowY(this.baseY, row);
     const left = colX(col);
     const right = colX(col + 1);
@@ -195,7 +199,8 @@ class RungPainter {
     this.line(left, y, mid - boxW / 2, y, powered);
     this.line(mid + boxW / 2, y, right, y, live);
 
-    const cls = live ? "symbol live" : "symbol";
+    // Box coloured by the comparison's own truth (see drawContact), wires by power.
+    const cls = conducts ? "symbol live" : "symbol";
     this.parts.push(
       svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
     );
@@ -220,6 +225,7 @@ class RungPainter {
   ): DrawResult {
     const flow = this.flow.elements.get(el);
     const live = flow?.live ?? false;
+    const conducts = flow?.conducts ?? false;
     const y = rowY(this.baseY, row);
     const left = colX(col);
     const right = colX(col + 1);
@@ -229,7 +235,10 @@ class RungPainter {
     this.line(left, y, mid - SYMBOL_HALF, y, powered);
     this.line(mid + SYMBOL_HALF, y, right, y, live);
 
-    const cls = live ? "symbol live" : "symbol";
+    // The *symbol* is coloured by the contact's own conduct (its condition is
+    // satisfied), independent of whether power reached it — so you can see which
+    // conditions are already met even after an upstream contact broke the line.
+    const cls = conducts ? "symbol live" : "symbol";
     this.parts.push(
       svg`<line x1=${mid - SYMBOL_HALF} y1=${y - 11} x2=${mid - SYMBOL_HALF} y2=${y + 11} class=${cls} />`,
     );

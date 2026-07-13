@@ -19,8 +19,15 @@ export interface HaConnection {
   ): Promise<() => void>;
 }
 
+export interface HassEntity {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+}
+
 export interface HomeAssistant {
   connection: HaConnection;
+  states: Record<string, HassEntity>;
   themes?: unknown;
   language?: string;
 }

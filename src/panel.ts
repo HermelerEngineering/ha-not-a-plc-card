@@ -6,8 +6,8 @@
  *   - lists the running services and lets you pick one,
  *   - shows a LIVE preview of that service's program (reusing the card's render /
  *     power-flow layer, coloured by a `subscribe_state` stream),
- *   - lets you bind each input tag to an entity via the native HA entity picker
- *     (phase 4.2) and save (`save_program`),
+ *   - lets you bind each input tag to an entity via a self-contained
+ *     `<input>` + `<datalist>` picker (phase 4.2) and save (`save_program`),
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
  * Structured add/remove of tags and elements, and the drag-drop canvas, land in
@@ -31,8 +31,23 @@ import { renderNetwork } from "./render";
 
 const VIEW_WIDTH = 720;
 
-// Domains offered by the entity picker per tag type (see project-plan §3a).
+// Domains offered by the entity picker per tag type (see project-plan §3a). We
+// build our own picker from `hass.states` because HA's `ha-entity-picker` is a
+// lazy-loaded element that is not reliably defined inside a custom panel.
 const REAL_DOMAINS = ["sensor", "input_number", "number"];
+const BOOL_DOMAINS = [
+  "binary_sensor",
+  "input_boolean",
+  "switch",
+  "light",
+  "fan",
+  "sun",
+  "person",
+  "device_tracker",
+  "cover",
+  "lock",
+  "group",
+];
 
 @customElement("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
@@ -229,6 +244,7 @@ export class NotAPlcPanel extends LitElement {
           ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
         </tbody>
       </table>
+      ${this._datalists()}
     `;
   }
 
@@ -243,19 +259,36 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
+  private _entityIds(domains: string[]): string[] {
+    const states = this.hass?.states ?? {};
+    return Object.keys(states)
+      .filter((id) => domains.includes(id.split(".")[0]))
+      .sort();
+  }
+
+  private _datalists(): TemplateResult {
+    const options = (domains: string[]) =>
+      this._entityIds(domains).map((id) => html`<option value=${id}></option>`);
+    return html`
+      <datalist id="np-real-entities">${options(REAL_DOMAINS)}</datalist>
+      <datalist id="np-bool-entities">${options(BOOL_DOMAINS)}</datalist>
+    `;
+  }
+
   private _renderBinding(name: string, tag: TagDef): TemplateResult {
     if (tag.kind !== "input") {
       return html`<span class="muted">—</span>`;
     }
-    const domains = tag.type === "REAL" ? REAL_DOMAINS : undefined;
+    const listId = tag.type === "REAL" ? "np-real-entities" : "np-bool-entities";
     return html`
-      <ha-entity-picker
-        .hass=${this.hass}
+      <input
+        class="entity-input"
+        list=${listId}
         .value=${tag.source ?? ""}
-        .includeDomains=${domains}
-        allow-custom-entity
-        @value-changed=${(e: CustomEvent) => this._setSource(name, e.detail.value)}
-      ></ha-entity-picker>
+        placeholder="entity_id"
+        @change=${(e: Event) =>
+          this._setSource(name, (e.target as HTMLInputElement).value)}
+      />
     `;
   }
 
@@ -361,6 +394,11 @@ export class NotAPlcPanel extends LitElement {
     }
     .muted {
       color: var(--secondary-text-color);
+    }
+    input.entity-input {
+      width: 100%;
+      min-width: 180px;
+      box-sizing: border-box;
     }
     details {
       margin-top: 12px;

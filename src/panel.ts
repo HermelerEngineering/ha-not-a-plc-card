@@ -6,12 +6,15 @@
  *   - lists the running services and lets you pick one,
  *   - shows a LIVE preview of that service's program (reusing the card's render /
  *     power-flow layer, coloured by a `subscribe_state` stream),
- *   - lets you bind each input tag to an entity via a self-contained
- *     `<input>` + `<datalist>` picker (phase 4.2) and save (`save_program`),
+ *   - lets you manage the tag table (phase 4.2): add/remove tags, rename them
+ *     (rewriting every reference across the IR), change kind/type, bind an input
+ *     to an entity via a self-contained `<input>` + `<datalist>` picker (with type
+ *     inference from the entity domain), set a coil's optional `writes` target and
+ *     a memory tag's `retain` flag — then save (`save_program`),
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
- * Structured add/remove of tags and elements, and the drag-drop canvas, land in
- * later 4.x sub-phases.
+ * Structured editing of rung elements, and the drag-drop canvas, land in later
+ * 4.x sub-phases.
  */
 
 import {
@@ -25,29 +28,37 @@ import {
 import { customElement, property, state } from "lit/decorators.js";
 
 import { HomeAssistant } from "./ha";
-import { Program, ServiceInfo, StateImage, TagDef } from "./ir";
+import {
+  Program,
+  ServiceInfo,
+  StateImage,
+  TagDef,
+  TagKind,
+  TagType,
+} from "./ir";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
+import {
+  BOOL_DOMAINS,
+  REAL_DOMAINS,
+  addTag,
+  domainsForType,
+  inferType,
+  isTagReferenced,
+  removeTag,
+  renameTag,
+  setKind,
+  setTag,
+} from "./tags";
 
 const VIEW_WIDTH = 720;
 
-// Domains offered by the entity picker per tag type (see project-plan §3a). We
-// build our own picker from `hass.states` because HA's `ha-entity-picker` is a
-// lazy-loaded element that is not reliably defined inside a custom panel.
-const REAL_DOMAINS = ["sensor", "input_number", "number"];
-const BOOL_DOMAINS = [
-  "binary_sensor",
-  "input_boolean",
-  "switch",
-  "light",
-  "fan",
-  "sun",
-  "person",
-  "device_tracker",
-  "cover",
-  "lock",
-  "group",
-];
+const TAG_KINDS: TagKind[] = ["input", "coil", "memory", "temp"];
+const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];
+
+// We build our own entity picker from `hass.states` because HA's
+// `ha-entity-picker` is a lazy-loaded element that is not reliably defined
+// inside a custom panel.
 
 @customElement("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
@@ -147,15 +158,74 @@ export class NotAPlcPanel extends LitElement {
     await this._subscribe();
   }
 
+  private _update(program: Program): void {
+    this._program = program;
+    this._status = "Unsaved changes.";
+  }
+
   private _setSource(name: string, value: string): void {
     if (!this._program) return;
     const tag = this._program.tags[name];
-    const updated: TagDef = { ...tag, source: value || undefined };
-    this._program = {
-      ...this._program,
-      tags: { ...this._program.tags, [name]: updated },
-    };
-    this._status = "Unsaved changes.";
+    // Binding an input entity infers the tag type from its domain (overridable).
+    const type = value ? inferType(value) : tag.type;
+    this._update(
+      setTag(this._program, name, { ...tag, source: value || undefined, type }),
+    );
+  }
+
+  private _setWrites(name: string, value: string): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    const writes = value ? { target: value } : undefined;
+    this._update(setTag(this._program, name, { ...tag, writes }));
+  }
+
+  private _setRetain(name: string, retain: boolean): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    this._update(
+      setTag(this._program, name, { ...tag, retain: retain || undefined }),
+    );
+  }
+
+  private _setKind(name: string, kind: TagKind): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    this._update(setTag(this._program, name, setKind(tag, kind)));
+  }
+
+  private _setType(name: string, type: TagType): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    this._update(setTag(this._program, name, { ...tag, type }));
+  }
+
+  private _renameTag(oldName: string, newName: string): void {
+    if (!this._program) return;
+    newName = newName.trim();
+    if (!newName || newName === oldName) return;
+    if (newName in this._program.tags) {
+      this._status = `A tag named '${newName}' already exists.`;
+      this.requestUpdate();
+      return;
+    }
+    this._update(renameTag(this._program, oldName, newName));
+  }
+
+  private _addTag(): void {
+    if (!this._program) return;
+    const { program } = addTag(this._program);
+    this._update(program);
+  }
+
+  private _removeTag(name: string): void {
+    if (!this._program) return;
+    if (isTagReferenced(this._program, name)) {
+      this._status = `Cannot delete '${name}': it is still used in the program.`;
+      this.requestUpdate();
+      return;
+    }
+    this._update(removeTag(this._program, name));
   }
 
   private async _saveProgram(): Promise<void> {
@@ -234,27 +304,76 @@ export class NotAPlcPanel extends LitElement {
     return html`
       <div class="tags-header">
         <h3>Tags</h3>
-        <button @click=${this._saveProgram}>Save</button>
+        <div class="tags-actions">
+          <button class="secondary" @click=${this._addTag}>+ Add tag</button>
+          <button @click=${this._saveProgram}>Save</button>
+        </div>
       </div>
       <table class="tags">
         <thead>
-          <tr><th>Name</th><th>Kind</th><th>Type</th><th>Binding</th></tr>
+          <tr>
+            <th>Name</th>
+            <th>Kind</th>
+            <th>Type</th>
+            <th>Binding</th>
+            <th></th>
+          </tr>
         </thead>
         <tbody>
           ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
         </tbody>
       </table>
+      ${entries.length === 0
+        ? html`<div class="hint">No tags yet — add one.</div>`
+        : ""}
       ${this._datalists()}
     `;
   }
 
   private _renderTagRow(name: string, tag: TagDef): TemplateResult {
+    const type: TagType = tag.type ?? "BOOL";
     return html`
       <tr>
-        <td>${name}</td>
-        <td>${tag.kind}</td>
-        <td>${tag.type ?? "BOOL"}</td>
+        <td>
+          <input
+            class="name-input"
+            .value=${name}
+            @change=${(e: Event) =>
+              this._renameTag(name, (e.target as HTMLInputElement).value)}
+          />
+        </td>
+        <td>
+          <select
+            .value=${tag.kind}
+            @change=${(e: Event) =>
+              this._setKind(name, (e.target as HTMLSelectElement).value as TagKind)}
+          >
+            ${TAG_KINDS.map(
+              (k) => html`<option value=${k} ?selected=${k === tag.kind}>${k}</option>`,
+            )}
+          </select>
+        </td>
+        <td>
+          <select
+            .value=${type}
+            @change=${(e: Event) =>
+              this._setType(name, (e.target as HTMLSelectElement).value as TagType)}
+          >
+            ${TAG_TYPES.map(
+              (t) => html`<option value=${t} ?selected=${t === type}>${t}</option>`,
+            )}
+          </select>
+        </td>
         <td>${this._renderBinding(name, tag)}</td>
+        <td>
+          <button
+            class="icon"
+            title="Delete tag"
+            @click=${() => this._removeTag(name)}
+          >
+            ✕
+          </button>
+        </td>
       </tr>
     `;
   }
@@ -275,21 +394,55 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
-  private _renderBinding(name: string, tag: TagDef): TemplateResult {
-    if (tag.kind !== "input") {
-      return html`<span class="muted">—</span>`;
-    }
-    const listId = tag.type === "REAL" ? "np-real-entities" : "np-bool-entities";
+  private _entityPicker(
+    value: string,
+    domains: string[],
+    placeholder: string,
+    onChange: (v: string) => void,
+  ): TemplateResult {
+    const listId = domains === REAL_DOMAINS ? "np-real-entities" : "np-bool-entities";
     return html`
       <input
         class="entity-input"
         list=${listId}
-        .value=${tag.source ?? ""}
-        placeholder="entity_id"
-        @change=${(e: Event) =>
-          this._setSource(name, (e.target as HTMLInputElement).value)}
+        .value=${value}
+        placeholder=${placeholder}
+        @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
       />
     `;
+  }
+
+  private _renderBinding(name: string, tag: TagDef): TemplateResult {
+    if (tag.kind === "input") {
+      return this._entityPicker(
+        tag.source ?? "",
+        domainsForType(tag.type ?? "BOOL"),
+        "entity_id",
+        (v) => this._setSource(name, v),
+      );
+    }
+    if (tag.kind === "coil") {
+      return this._entityPicker(
+        tag.writes?.target ?? "",
+        BOOL_DOMAINS,
+        "writes to… (optional)",
+        (v) => this._setWrites(name, v),
+      );
+    }
+    if (tag.kind === "memory") {
+      return html`
+        <label class="retain">
+          <input
+            type="checkbox"
+            .checked=${tag.retain ?? false}
+            @change=${(e: Event) =>
+              this._setRetain(name, (e.target as HTMLInputElement).checked)}
+          />
+          retain across restart
+        </label>
+      `;
+    }
+    return html`<span class="muted">—</span>`;
   }
 
   private _renderPreview(): TemplateResult {
@@ -374,6 +527,10 @@ export class NotAPlcPanel extends LitElement {
       align-items: center;
       justify-content: space-between;
     }
+    .tags-actions {
+      display: flex;
+      gap: 8px;
+    }
     h3 {
       margin: 4px 0 8px;
     }
@@ -395,10 +552,47 @@ export class NotAPlcPanel extends LitElement {
     .muted {
       color: var(--secondary-text-color);
     }
+    table.tags input,
+    table.tags select {
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 4px;
+      padding: 4px 6px;
+      box-sizing: border-box;
+    }
     input.entity-input {
       width: 100%;
-      min-width: 180px;
-      box-sizing: border-box;
+      min-width: 160px;
+    }
+    input.name-input {
+      width: 100%;
+      min-width: 110px;
+    }
+    label.retain {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    label.retain input {
+      width: auto;
+      min-width: 0;
+    }
+    button.secondary {
+      background: var(--secondary-background-color, #e0e0e0);
+      color: var(--primary-text-color);
+    }
+    button.icon {
+      background: none;
+      color: var(--secondary-text-color);
+      padding: 4px 8px;
+      font-size: 1em;
+    }
+    button.icon:hover {
+      color: var(--error-color, #db4437);
     }
     details {
       margin-top: 12px;

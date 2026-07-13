@@ -6,7 +6,7 @@
  * model — it never invents its own program representation.
  */
 
-export type TagKind = "input" | "coil" | "memory";
+export type TagKind = "input" | "coil" | "memory" | "temp";
 export type TagType = "BOOL" | "REAL" | "TIME";
 export type ContactMode = "NO" | "NC";
 export type CoilMode = "=" | "S" | "R";

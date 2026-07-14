@@ -1,18 +1,19 @@
 /**
  * Pure helpers for editing the *structure* of a program (phase 4.3):
- * networks, rungs, top-level series elements and coils.
+ * networks, rungs, series elements (including nested branch / NOT groups) and
+ * coils.
  *
  * Like `tags.ts` these are side-effect free and unit-tested with vitest; the
  * panel wires them to forms. They operate immutably (always returning a new
  * `Program`) and address targets by index: `ni` = network index, `ri` = rung
- * index within that network, `ei`/`ci` = element/coil index within that rung.
- *
- * Scope note: element ops act on the *top level* of a rung's series. Editing the
- * contents of a branch or NOT group (nested series) is a later sub-phase; those
- * stay editable via the DSL text escape hatch until then.
+ * index within that network, `ei`/`ci` = element/coil index. A nested series is
+ * addressed by a `SeriesStep[]` path from the rung's top-level series (empty for
+ * the top level); the top-level `addElement`/… helpers are thin wrappers over the
+ * path-based `addElementIn`/… with an empty path.
  */
 
 import {
+  BranchEl,
   Coil,
   CoilMode,
   CompareEl,
@@ -22,8 +23,11 @@ import {
   Element,
   FbRefEl,
   Network,
+  NotEl,
   Program,
   Rung,
+  isBranch,
+  isNot,
 } from "./ir";
 
 // --- immutable array helpers ------------------------------------------------
@@ -173,13 +177,101 @@ function updateRungAt(
   return withRungs(program, ni, mapAt(net.rungs, ri, fn));
 }
 
+/**
+ * One hop into a nested series: into a branch's path `path`, or into a NOT
+ * group's inner series (`path` omitted). A `SeriesStep[]` addresses a series
+ * array reachable from the rung's top-level series (an empty array = top level).
+ */
+export interface SeriesStep {
+  index: number;
+  path?: number;
+}
+
+/** Rewrite the series array located at `steps` (from the rung's top series). */
+function mapSeriesAt(
+  series: Element[],
+  steps: SeriesStep[],
+  fn: (s: Element[]) => Element[],
+): Element[] {
+  if (steps.length === 0) return fn(series);
+  const [step, ...rest] = steps;
+  return series.map((el, i) => {
+    if (i !== step.index) return el;
+    if (step.path === undefined) {
+      return isNot(el) ? { not: mapSeriesAt(el.not, rest, fn) } : el;
+    }
+    if (!isBranch(el)) return el;
+    return {
+      branch: el.branch.map((p, pi) =>
+        pi === step.path ? mapSeriesAt(p, rest, fn) : p,
+      ),
+    };
+  });
+}
+
+function editSeriesAt(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  fn: (s: Element[]) => Element[],
+): Program {
+  return updateRungAt(program, ni, ri, (r) => ({
+    ...r,
+    series: mapSeriesAt(r.series, steps, fn),
+  }));
+}
+
+export function addElementIn(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  el: Element,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) => [...s, el]);
+}
+
+export function removeElementIn(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) => removeAt(s, ei));
+}
+
+export function updateElementIn(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+  el: Element,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) => mapAt(s, ei, () => el));
+}
+
+export function moveElementIn(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+  delta: number,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) => moveItem(s, ei, delta));
+}
+
+// Top-level convenience wrappers (steps = []).
 export function addElement(
   program: Program,
   ni: number,
   ri: number,
   el: Element,
 ): Program {
-  return updateRungAt(program, ni, ri, (r) => ({ ...r, series: [...r.series, el] }));
+  return addElementIn(program, ni, ri, [], el);
 }
 
 export function removeElement(
@@ -188,10 +280,7 @@ export function removeElement(
   ri: number,
   ei: number,
 ): Program {
-  return updateRungAt(program, ni, ri, (r) => ({
-    ...r,
-    series: removeAt(r.series, ei),
-  }));
+  return removeElementIn(program, ni, ri, [], ei);
 }
 
 export function updateElement(
@@ -201,10 +290,7 @@ export function updateElement(
   ei: number,
   el: Element,
 ): Program {
-  return updateRungAt(program, ni, ri, (r) => ({
-    ...r,
-    series: mapAt(r.series, ei, () => el),
-  }));
+  return updateElementIn(program, ni, ri, [], ei, el);
 }
 
 export function moveElement(
@@ -214,10 +300,15 @@ export function moveElement(
   ei: number,
   delta: number,
 ): Program {
-  return updateRungAt(program, ni, ri, (r) => ({
-    ...r,
-    series: moveItem(r.series, ei, delta),
-  }));
+  return moveElementIn(program, ni, ri, [], ei, delta);
+}
+
+export function newBranch(): BranchEl {
+  return { branch: [[], []] };
+}
+
+export function newNot(): NotEl {
+  return { not: [] };
 }
 
 export function addCoil(

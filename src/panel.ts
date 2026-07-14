@@ -15,13 +15,13 @@
  *     them and edit their typed params (timer preset, counter PV + reset/load tag,
  *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
  *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
- *     and rungs (with titles), and per rung add/remove/move/edit the top-level
- *     series elements (contact, compare, fb reference) and coils via forms — then
- *     save (`save_program`),
+ *     and rungs (with titles), and per rung add/remove/move/edit the series elements
+ *     — contact, compare, fb reference, and nested branch (OR) / NOT groups, edited
+ *     recursively to any depth — plus coils, all via forms, then save
+ *     (`save_program`),
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
- * Editing the contents of a branch / NOT group (nested series) and the drag-drop
- * canvas land in later 4.x sub-phases; those stay editable via the DSL for now.
+ * The drag-drop canvas lands in a later 4.x sub-phase.
  */
 
 import {
@@ -36,6 +36,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { HomeAssistant } from "./ha";
 import {
+  BranchEl,
   Coil,
   CoilMode,
   CompareEl,
@@ -46,6 +47,7 @@ import {
   FbRefEl,
   FunctionBlockDef,
   Network,
+  NotEl,
   Program,
   Rung,
   ServiceInfo,
@@ -71,25 +73,28 @@ import {
   setFbType,
 } from "./fbs";
 import {
+  SeriesStep,
   addCoil,
-  addElement,
+  addElementIn,
   addNetwork,
   addRung,
-  moveElement,
+  moveElementIn,
   moveNetwork,
   moveRung,
+  newBranch,
   newCoil,
   newCompare,
   newContact,
   newFbRef,
+  newNot,
   removeCoil,
-  removeElement,
+  removeElementIn,
   removeNetwork,
   removeRung,
   setNetworkTitle,
   setRungTitle,
   updateCoil,
-  updateElement,
+  updateElementIn,
 } from "./elements";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
@@ -741,32 +746,7 @@ export class NotAPlcPanel extends LitElement {
         <div class="rung-body">
           <div class="col">
             <div class="col-label">Series (AND)</div>
-            ${rung.series.map((el, ei) => this._renderSeriesElement(el, ni, ri, ei))}
-            <div class="add-row">
-              <button
-                class="chip"
-                @click=${() => this._edit((p) => addElement(p, ni, ri, newContact()))}
-              >
-                + Contact
-              </button>
-              <button
-                class="chip"
-                @click=${() => this._edit((p) => addElement(p, ni, ri, newCompare()))}
-              >
-                + Compare
-              </button>
-              ${this._fbNames().length
-                ? html`<button
-                    class="chip"
-                    @click=${() =>
-                      this._edit((p) =>
-                        addElement(p, ni, ri, newFbRef(this._fbNames()[0])),
-                      )}
-                  >
-                    + FB
-                  </button>`
-                : ""}
-            </div>
+            ${this._renderSeries(rung.series, ni, ri, [])}
           </div>
           <div class="col">
             <div class="col-label">Coils</div>
@@ -803,30 +783,126 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
-  private _elActions(ni: number, ri: number, ei: number): TemplateResult {
+  /** Render one series level (elements + an add toolbar); recurses for branch/NOT. */
+  private _renderSeries(
+    series: Element[],
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+  ): TemplateResult {
+    const add = (el: Element) =>
+      this._edit((p) => addElementIn(p, ni, ri, steps, el));
+    return html`
+      ${series.map((el, ei) => this._renderSeriesElement(el, ni, ri, steps, ei))}
+      <div class="add-row">
+        <button class="chip" @click=${() => add(newContact())}>+ Contact</button>
+        <button class="chip" @click=${() => add(newCompare())}>+ Compare</button>
+        <button class="chip" @click=${() => add(newBranch())}>+ Branch</button>
+        <button class="chip" @click=${() => add(newNot())}>+ NOT</button>
+        ${steps.length === 0 && this._fbNames().length
+          ? html`<button class="chip" @click=${() => add(newFbRef(this._fbNames()[0]))}>
+              + FB
+            </button>`
+          : ""}
+      </div>
+    `;
+  }
+
+  private _elActions(
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+    ei: number,
+  ): TemplateResult {
     return html`
       ${this._moveButtons(
-        () => this._edit((p) => moveElement(p, ni, ri, ei, -1)),
-        () => this._edit((p) => moveElement(p, ni, ri, ei, 1)),
+        () => this._edit((p) => moveElementIn(p, ni, ri, steps, ei, -1)),
+        () => this._edit((p) => moveElementIn(p, ni, ri, steps, ei, 1)),
       )}
       <button
         class="icon"
         title="Delete element"
-        @click=${() => this._edit((p) => removeElement(p, ni, ri, ei))}
+        @click=${() => this._edit((p) => removeElementIn(p, ni, ri, steps, ei))}
       >
         ✕
       </button>
     `;
   }
 
+  private _removeBranchPath(
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+    ei: number,
+    branch: BranchEl,
+    pi: number,
+  ): void {
+    if (branch.branch.length <= 1) {
+      this._edit((p) => removeElementIn(p, ni, ri, steps, ei));
+    } else {
+      const next: BranchEl = { branch: branch.branch.filter((_, i) => i !== pi) };
+      this._edit((p) => updateElementIn(p, ni, ri, steps, ei, next));
+    }
+  }
+
   private _renderSeriesElement(
     el: Element,
     ni: number,
     ri: number,
+    steps: SeriesStep[],
     ei: number,
   ): TemplateResult {
     const set = (next: Element) =>
-      this._edit((p) => updateElement(p, ni, ri, ei, next));
+      this._edit((p) => updateElementIn(p, ni, ri, steps, ei, next));
+
+    if (isBranch(el)) {
+      const b = el as BranchEl;
+      return html`
+        <div class="nested">
+          <div class="el-row">
+            <span class="el-type">branch (OR)</span>
+            <span class="spacer"></span>
+            ${this._elActions(ni, ri, steps, ei)}
+          </div>
+          ${b.branch.map(
+            (path, pi) => html`
+              <div class="path">
+                <div class="path-head">
+                  <span class="path-label">path ${pi + 1}</span>
+                  <button
+                    class="icon"
+                    title="Remove path"
+                    @click=${() => this._removeBranchPath(ni, ri, steps, ei, b, pi)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                ${this._renderSeries(path, ni, ri, [...steps, { index: ei, path: pi }])}
+              </div>
+            `,
+          )}
+          <button class="chip" @click=${() => set({ branch: [...b.branch, []] })}>
+            + Path
+          </button>
+        </div>
+      `;
+    }
+
+    if (isNot(el)) {
+      const n = el as NotEl;
+      return html`
+        <div class="nested">
+          <div class="el-row">
+            <span class="el-type">NOT</span>
+            <span class="spacer"></span>
+            ${this._elActions(ni, ri, steps, ei)}
+          </div>
+          <div class="path">
+            ${this._renderSeries(n.not, ni, ri, [...steps, { index: ei }])}
+          </div>
+        </div>
+      `;
+    }
 
     let body: TemplateResult;
     if (isContact(el)) {
@@ -879,17 +955,11 @@ export class NotAPlcPanel extends LitElement {
           set({ ...f, instance: v }),
         )}
       `;
-    } else if (isBranch(el)) {
-      body = html`<span class="el-type">branch</span>
-        <span class="muted">edit nested paths via DSL</span>`;
-    } else if (isNot(el)) {
-      body = html`<span class="el-type">NOT</span>
-        <span class="muted">edit inner series via DSL</span>`;
     } else {
       body = html`<span class="muted">unknown element</span>`;
     }
 
-    return html`<div class="el-row">${body}<span class="spacer"></span>${this._elActions(ni, ri, ei)}</div>`;
+    return html`<div class="el-row">${body}<span class="spacer"></span>${this._elActions(ni, ri, steps, ei)}</div>`;
   }
 
   private _parseRight(raw: string): number | string {
@@ -1172,6 +1242,28 @@ export class NotAPlcPanel extends LitElement {
       gap: 6px;
       margin-top: 4px;
       flex-wrap: wrap;
+    }
+    .nested {
+      border: 1px dashed var(--divider-color, #ccc);
+      border-radius: 6px;
+      padding: 4px 8px;
+      margin: 4px 0;
+    }
+    .path {
+      border-left: 2px solid var(--divider-color, #ddd);
+      padding-left: 8px;
+      margin: 4px 0 4px 6px;
+    }
+    .path-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .path-label {
+      font-size: 0.72em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--secondary-text-color);
     }
     button.chip {
       background: var(--secondary-background-color, #e8e8e8);

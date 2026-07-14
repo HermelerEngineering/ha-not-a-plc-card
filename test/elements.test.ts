@@ -2,23 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import { Program } from "../src/ir";
 import {
+  BranchEl,
+  ContactEl,
+  NotEl,
+} from "../src/ir";
+import {
   addCoil,
   addElement,
+  addElementIn,
   addNetwork,
   addRung,
   freshId,
   moveElement,
   moveRung,
+  newBranch,
   newCoil,
   newContact,
+  newNot,
   removeCoil,
   removeElement,
+  removeElementIn,
   removeNetwork,
   removeRung,
   setNetworkTitle,
   setRungTitle,
   updateCoil,
   updateElement,
+  updateElementIn,
 } from "../src/elements";
 
 function prog(): Program {
@@ -126,5 +136,72 @@ describe("element ops", () => {
     expect(addRung(p0, 5)).toBe(p0);
     expect(addElement(p0, 5, 0, newContact("b"))).toBe(p0);
     expect(addElement(p0, 0, 5, newContact("b"))).toBe(p0);
+  });
+});
+
+function progNested(): Program {
+  return {
+    tags: {
+      a: { kind: "input", type: "BOOL", source: "binary_sensor.a" },
+      out: { kind: "coil", type: "BOOL" },
+    },
+    networks: [
+      {
+        id: "n1",
+        rungs: [
+          {
+            id: "r1",
+            series: [{ branch: [[newContact("a")], []] }],
+            coils: [newCoil("out")],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("constructors newBranch / newNot", () => {
+  it("build empty containers ready to fill", () => {
+    expect(newBranch()).toEqual({ branch: [[], []] });
+    expect(newNot()).toEqual({ not: [] });
+  });
+});
+
+describe("nested series editing (SeriesStep path)", () => {
+  it("adds/updates/removes inside a branch path", () => {
+    // Add a contact into the (empty) second path of the branch.
+    let p = addElementIn(progNested(), 0, 0, [{ index: 0, path: 1 }], newContact("a"));
+    let branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect(branch.branch[1]).toHaveLength(1);
+    expect((branch.branch[1][0] as ContactEl).tag).toBe("a");
+
+    // Update it to NC.
+    p = updateElementIn(p, 0, 0, [{ index: 0, path: 1 }], 0, newContact("a", "NC"));
+    branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect((branch.branch[1][0] as ContactEl).mode).toBe("NC");
+
+    // The first path is left untouched.
+    expect(branch.branch[0]).toHaveLength(1);
+
+    // Remove it again.
+    p = removeElementIn(p, 0, 0, [{ index: 0, path: 1 }], 0);
+    branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect(branch.branch[1]).toHaveLength(0);
+  });
+
+  it("adds inside a NOT group's inner series", () => {
+    const base: Program = {
+      tags: { a: { kind: "input", type: "BOOL", source: "binary_sensor.a" } },
+      networks: [
+        {
+          id: "n1",
+          rungs: [{ id: "r1", series: [newNot()], coils: [newCoil("a")] }],
+        },
+      ],
+    };
+    const p = addElementIn(base, 0, 0, [{ index: 0 }], newContact("a"));
+    const not = p.networks[0].rungs[0].series[0] as NotEl;
+    expect(not.not).toHaveLength(1);
+    expect((not.not[0] as ContactEl).tag).toBe("a");
   });
 });

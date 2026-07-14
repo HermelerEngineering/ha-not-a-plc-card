@@ -308,6 +308,25 @@ class RungPainter {
   }
 }
 
+/**
+ * Optional interaction layer for the editor. When passed to `renderNetwork`, the
+ * renderer draws transparent hit-targets over the ladder — element/coil select
+ * boxes and (when a tool is armed) insertion slots — wired to these callbacks. The
+ * read-only card passes no `edit`, so its rendering is byte-for-byte unchanged.
+ */
+export interface CanvasEdit {
+  ni: number;
+  /** What the armed palette tool places, or null in "select" mode. */
+  armed: "element" | "coil" | null;
+  selected?:
+    | { kind: "el"; ni: number; ri: number; ei: number }
+    | { kind: "coil"; ni: number; ri: number; ci: number };
+  onInsertElement: (ri: number, index: number) => void;
+  onSelectElement: (ri: number, ei: number) => void;
+  onInsertCoil: (ri: number, index: number) => void;
+  onSelectCoil: (ri: number, ci: number) => void;
+}
+
 function renderRung(
   rung: Rung,
   baseY: number,
@@ -315,6 +334,8 @@ function renderRung(
   width: number,
   fbs: Record<string, FunctionBlockDef>,
   state: StateImage,
+  edit?: CanvasEdit,
+  ri = 0,
 ): { part: SVGTemplateResult; height: number } {
   const measure = measureSeries(rung.series);
   // The rung is as tall as its widest need: the series' branch rows or, when
@@ -376,6 +397,71 @@ function renderRung(
   });
 
   const height = rows * CELL_H;
+
+  // Editor overlay: transparent hit-targets over the ladder, drawn last so they
+  // sit on top. Only emitted when the panel passes an `edit` config.
+  if (edit) {
+    const selEl = (ei: number) =>
+      edit.selected?.kind === "el" &&
+      edit.selected.ni === edit.ni &&
+      edit.selected.ri === ri &&
+      edit.selected.ei === ei;
+
+    let col = 0;
+    const slot = (c: number, index: number) => {
+      if (edit.armed !== "element") return;
+      painter.parts.push(
+        svg`<rect class="hit-slot" x=${colX(c) - 7} y=${baseY} width="14" height=${height}
+          @click=${() => edit.onInsertElement(ri, index)} />`,
+      );
+    };
+    rung.series.forEach((el, ei) => {
+      slot(col, ei);
+      const w = measureElement(el).cols;
+      if (edit.armed === null) {
+        painter.parts.push(
+          svg`<rect class="hit-el ${selEl(ei) ? "sel" : ""}" x=${colX(col)} y=${baseY}
+            width=${colX(col + w) - colX(col)} height=${height}
+            @click=${() => edit.onSelectElement(ri, ei)} />`,
+        );
+      } else if (selEl(ei)) {
+        painter.parts.push(
+          svg`<rect class="sel-outline" x=${colX(col)} y=${baseY}
+            width=${colX(col + w) - colX(col)} height=${height} />`,
+        );
+      }
+      col += w;
+    });
+    slot(col, rung.series.length);
+
+    rung.coils.forEach((coil, i) => {
+      const cy = baselineY + i * CELL_H;
+      const sel =
+        edit.selected?.kind === "coil" &&
+        edit.selected.ni === edit.ni &&
+        edit.selected.ri === ri &&
+        edit.selected.ci === i;
+      if (edit.armed === null) {
+        painter.parts.push(
+          svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${coilX} y=${cy - CELL_H / 2}
+            width=${CELL_W} height=${CELL_H} @click=${() => edit.onSelectCoil(ri, i)} />`,
+        );
+      } else if (sel) {
+        painter.parts.push(
+          svg`<rect class="sel-outline" x=${coilX} y=${cy - CELL_H / 2}
+            width=${CELL_W} height=${CELL_H} />`,
+        );
+      }
+    });
+    if (edit.armed === "coil") {
+      const cy = baselineY + rung.coils.length * CELL_H;
+      painter.parts.push(
+        svg`<rect class="hit-slot" x=${coilX} y=${cy - CELL_H / 2} width=${CELL_W} height="14"
+          @click=${() => edit.onInsertCoil(ri, rung.coils.length)} />`,
+      );
+    }
+  }
+
   return { part: svg`<g>${painter.parts}</g>`, height };
 }
 
@@ -390,16 +476,17 @@ export function renderNetwork(
   width: number,
   fbs: Record<string, FunctionBlockDef>,
   state: StateImage,
+  edit?: CanvasEdit,
 ): RenderedNetwork {
   const parts: SVGTemplateResult[] = [];
   let y = TITLE_H;
   if (network.title) {
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
-  for (const rung of network.rungs) {
-    const r = renderRung(rung, y, flow, width, fbs, state);
+  network.rungs.forEach((rung, ri) => {
+    const r = renderRung(rung, y, flow, width, fbs, state, edit, ri);
     parts.push(r.part);
     y += r.height + 12;
-  }
+  });
   return { part: svg`<g>${parts}</g>`, height: y + PAD };
 }

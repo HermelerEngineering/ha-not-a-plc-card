@@ -19,10 +19,11 @@
  *     — contact, compare, fb reference, an inline NOT power inverter, and nested
  *     branch (OR) groups edited recursively to any depth — plus coils, all via
  *     forms, then save (`save_program`),
- *   - offers a click-to-place **canvas** (phase 4.4): arm a palette tool, then click
- *     a ＋ slot to insert that element/coil into a rung; click an element to select
- *     it and edit it in an inspector (reusing the form editors). A first step toward
- *     the drag-drop canvas; true drag gestures are a later polish,
+ *   - offers a click-to-place **canvas on the live ladder** (phase 4.4 stage B): the
+ *     renderer draws transparent hit-targets over the real SVG diagram — arm a
+ *     palette tool and click a ＋ slot to insert an element/coil, or click an element
+ *     to select and edit it in an inspector (reusing the form editors). Pointer-drag
+ *     gestures (stage C) build on the same hit-targets later,
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  */
 
@@ -99,9 +100,9 @@ import {
   updateCoil,
   updateElementIn,
 } from "./elements";
-import { ToolTarget, elementLabel } from "./canvas";
+import { ToolTarget } from "./canvas";
 import { computePowerFlow } from "./power-flow";
-import { renderNetwork } from "./render";
+import { CanvasEdit, renderNetwork } from "./render";
 import {
   BOOL_DOMAINS,
   REAL_DOMAINS,
@@ -1045,13 +1046,6 @@ export class NotAPlcPanel extends LitElement {
     this._sel = undefined;
   }
 
-  private _sameSteps(a: SeriesStep[], b: SeriesStep[]): boolean {
-    return (
-      a.length === b.length &&
-      a.every((s, i) => s.index === b[i].index && s.path === b[i].path)
-    );
-  }
-
   private _elementAt(
     ni: number,
     ri: number,
@@ -1130,7 +1124,36 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
+  /** Build the interaction config the renderer wires its hit-targets to. */
+  private _editConfig(ni: number): CanvasEdit {
+    let selected: CanvasEdit["selected"];
+    if (this._sel && this._sel.ni === ni) {
+      selected =
+        this._sel.kind === "el"
+          ? { kind: "el", ni, ri: this._sel.ri, ei: this._sel.ei }
+          : { kind: "coil", ni, ri: this._sel.ri, ci: this._sel.ci };
+    }
+    return {
+      ni,
+      armed: this._tool?.target ?? null,
+      selected,
+      onInsertElement: (ri, index) => this._placeElement(ni, ri, [], index),
+      onSelectElement: (ri, ei) => this._selectEl(ni, ri, [], ei),
+      onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
+      onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
+    };
+  }
+
   private _renderCanvasNetwork(net: Network, ni: number): TemplateResult {
+    const flow = computePowerFlow(this._program!, this._stateImage);
+    const rendered = renderNetwork(
+      net,
+      flow,
+      VIEW_WIDTH,
+      this._program!.fbs ?? {},
+      this._stateImage,
+      this._editConfig(ni),
+    );
     return html`
       <div class="cv-net">
         <div class="cv-net-head">
@@ -1140,89 +1163,24 @@ export class NotAPlcPanel extends LitElement {
           <button class="secondary small" @click=${() => this._edit((p) => addRung(p, ni))}>
             + Rung
           </button>
+          <button
+            class="icon"
+            title="Delete network"
+            @click=${() => this._edit((p) => removeNetwork(p, ni))}
+          >
+            ✕
+          </button>
         </div>
-        ${net.rungs.map((rung, ri) => this._renderCanvasRung(rung, ni, ri))}
+        <svg
+          class="cv-svg ${this._tool ? "arming" : ""}"
+          viewBox="0 0 ${VIEW_WIDTH} ${rendered.height}"
+          width="100%"
+          role="img"
+        >
+          ${rendered.part}
+        </svg>
       </div>
     `;
-  }
-
-  private _renderCanvasRung(rung: Rung, ni: number, ri: number): TemplateResult {
-    const flow: TemplateResult[] = [];
-    rung.series.forEach((el, ei) => {
-      flow.push(this._slot(ni, ri, [], ei));
-      flow.push(this._tile(el, ni, ri, [], ei));
-    });
-    flow.push(this._slot(ni, ri, [], rung.series.length));
-
-    const coils: TemplateResult[] = [];
-    rung.coils.forEach((c, ci) => {
-      coils.push(this._coilSlot(ni, ri, ci));
-      coils.push(this._coilTile(c, ni, ri, ci));
-    });
-    coils.push(this._coilSlot(ni, ri, rung.coils.length));
-
-    return html`
-      <div class="cv-rung">
-        <span class="chip-id">${rung.id}</span>
-        <div class="cv-rail"></div>
-        <div class="cv-flow">${flow}</div>
-        <div class="cv-arrow">▸</div>
-        <div class="cv-coil-col">${coils}</div>
-      </div>
-    `;
-  }
-
-  private _slot(ni: number, ri: number, steps: SeriesStep[], index: number): TemplateResult {
-    const active = this._tool?.target === "element";
-    return html`<button
-      class="cv-slot ${active ? "active" : ""}"
-      ?disabled=${!active}
-      title="Insert here"
-      @click=${() => this._placeElement(ni, ri, steps, index)}
-    >
-      ${active ? "＋" : ""}
-    </button>`;
-  }
-
-  private _tile(el: Element, ni: number, ri: number, steps: SeriesStep[], ei: number): TemplateResult {
-    const selected =
-      this._sel?.kind === "el" &&
-      this._sel.ni === ni &&
-      this._sel.ri === ri &&
-      this._sel.ei === ei &&
-      this._sameSteps(this._sel.steps, steps);
-    return html`<button
-      class="cv-tile ${selected ? "sel" : ""}"
-      @click=${() => this._selectEl(ni, ri, steps, ei)}
-    >
-      ${elementLabel(el, this._program?.fbs ?? {})}
-    </button>`;
-  }
-
-  private _coilSlot(ni: number, ri: number, index: number): TemplateResult {
-    const active = this._tool?.target === "coil";
-    return html`<button
-      class="cv-slot ${active ? "active" : ""}"
-      ?disabled=${!active}
-      title="Insert coil here"
-      @click=${() => this._placeCoil(ni, ri, index)}
-    >
-      ${active ? "＋" : ""}
-    </button>`;
-  }
-
-  private _coilTile(coil: Coil, ni: number, ri: number, ci: number): TemplateResult {
-    const selected =
-      this._sel?.kind === "coil" &&
-      this._sel.ni === ni &&
-      this._sel.ri === ri &&
-      this._sel.ci === ci;
-    return html`<button
-      class="cv-tile coil ${selected ? "sel" : ""}"
-      @click=${() => this._selectCoil(ni, ri, ci)}
-    >
-      ( ${coil.mode ?? "="} ${coil.tag || "?"} )
-    </button>`;
   }
 
   private _renderInspector(): TemplateResult {
@@ -1605,73 +1563,39 @@ export class NotAPlcPanel extends LitElement {
       gap: 8px;
       margin-bottom: 4px;
     }
-    .cv-rung {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 0;
-      border-top: 1px solid var(--divider-color, #eee);
-      overflow-x: auto;
+    .cv-svg {
+      display: block;
+      margin-top: 4px;
     }
-    .cv-rail {
-      width: 3px;
-      align-self: stretch;
-      min-height: 28px;
-      background: var(--primary-text-color);
-      border-radius: 2px;
-    }
-    .cv-flow {
-      display: flex;
-      align-items: center;
-      flex: 1;
-      min-width: 0;
-    }
-    .cv-arrow {
-      color: var(--secondary-text-color);
-    }
-    .cv-coil-col {
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 2px;
-    }
-    .cv-slot {
-      min-width: 16px;
-      height: 30px;
-      border: none;
-      background: none;
-      color: var(--primary-color);
-      cursor: default;
-      padding: 0;
-      font-size: 1.1em;
-    }
-    .cv-slot.active {
+    /* Editor hit-targets overlaid on the ladder SVG. */
+    .cv-svg .hit-el {
+      fill: transparent;
+      pointer-events: all;
       cursor: pointer;
-      border: 1px dashed var(--primary-color);
-      border-radius: 4px;
-      min-width: 22px;
     }
-    .cv-slot.active:hover {
-      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+    .cv-svg .hit-el:hover {
+      fill: color-mix(in srgb, var(--primary-color) 12%, transparent);
     }
-    .cv-tile {
-      font-family: var(--code-font-family, monospace);
-      font-size: 0.9em;
-      color: var(--primary-text-color);
-      background: var(--card-background-color, #fff);
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 6px;
-      padding: 6px 10px;
+    .cv-svg .hit-el.sel {
+      fill: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      stroke: var(--primary-color);
+      stroke-width: 1.5;
+    }
+    .cv-svg .hit-slot {
+      fill: color-mix(in srgb, var(--primary-color) 25%, transparent);
+      stroke: var(--primary-color);
+      stroke-width: 1;
+      stroke-dasharray: 3 2;
+      pointer-events: all;
       cursor: pointer;
-      white-space: nowrap;
     }
-    .cv-tile.coil {
-      border-style: solid;
-      border-color: var(--divider-color, #bbb);
+    .cv-svg .hit-slot:hover {
+      fill: var(--primary-color);
     }
-    .cv-tile.sel {
-      outline: 2px solid var(--primary-color);
-      border-color: var(--primary-color);
+    .cv-svg .sel-outline {
+      fill: none;
+      stroke: var(--primary-color);
+      stroke-width: 1.5;
     }
     .inspector {
       margin-top: 10px;

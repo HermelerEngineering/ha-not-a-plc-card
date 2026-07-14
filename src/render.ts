@@ -434,7 +434,7 @@ function renderRung(
     });
     slot(col, rung.series.length);
 
-    rung.coils.forEach((coil, i) => {
+    rung.coils.forEach((_coil, i) => {
       const cy = baselineY + i * CELL_H;
       const sel =
         edit.selected?.kind === "coil" &&

@@ -9,6 +9,8 @@ import {
   addNetwork,
   addRung,
   freshId,
+  insertCoil,
+  insertElementIn,
   moveElement,
   moveRung,
   newBranch,
@@ -110,6 +112,18 @@ describe("element ops", () => {
 
     p = removeElement(p, 0, 0, 0);
     expect(p.networks[0].rungs[0].series).toHaveLength(1);
+  });
+
+  it("inserts an element and a coil at a given position", () => {
+    // Insert before the existing contact 'a' at index 0.
+    const p = insertElementIn(prog(), 0, 0, [], 0, newContact("b"));
+    const series = p.networks[0].rungs[0].series;
+    expect((series[0] as { tag: string }).tag).toBe("b");
+    expect((series[1] as { tag: string }).tag).toBe("a");
+
+    const p2 = insertCoil(prog(), 0, 0, 0, newCoil("out", "S"));
+    expect(p2.networks[0].rungs[0].coils).toHaveLength(2);
+    expect(p2.networks[0].rungs[0].coils[0].mode).toBe("S");
   });
 
   it("adds, updates and removes coils", () => {

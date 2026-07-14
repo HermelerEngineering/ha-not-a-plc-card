@@ -19,9 +19,11 @@
  *     — contact, compare, fb reference, an inline NOT power inverter, and nested
  *     branch (OR) groups edited recursively to any depth — plus coils, all via
  *     forms, then save (`save_program`),
+ *   - offers a click-to-place **canvas** (phase 4.4): arm a palette tool, then click
+ *     a ＋ slot to insert that element/coil into a rung; click an element to select
+ *     it and edit it in an inspector (reusing the form editors). A first step toward
+ *     the drag-drop canvas; true drag gestures are a later polish,
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
- *
- * The drag-drop canvas lands in a later 4.x sub-phase.
  */
 
 import {
@@ -77,6 +79,8 @@ import {
   addElementIn,
   addNetwork,
   addRung,
+  insertCoil,
+  insertElementIn,
   moveElementIn,
   moveNetwork,
   moveRung,
@@ -95,6 +99,7 @@ import {
   updateCoil,
   updateElementIn,
 } from "./elements";
+import { ToolTarget, elementLabel } from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
 import {
@@ -123,6 +128,18 @@ const WRITABLE_KINDS = new Set<TagKind>(["coil", "memory", "temp"]);
 // `ha-entity-picker` is a lazy-loaded element that is not reliably defined
 // inside a custom panel.
 
+/** A canvas palette tool: arm it, then click a slot to place its element. */
+interface Tool {
+  label: string;
+  target: ToolTarget;
+  make: () => Element | Coil;
+}
+
+/** What the canvas has selected for the inspector. */
+type Selection =
+  | { kind: "el"; ni: number; ri: number; steps: SeriesStep[]; ei: number }
+  | { kind: "coil"; ni: number; ri: number; ci: number };
+
 @customElement("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
@@ -135,6 +152,8 @@ export class NotAPlcPanel extends LitElement {
   @state() private _text = "";
   @state() private _status = "";
   @state() private _loaded = false;
+  @state() private _tool?: Tool;
+  @state() private _sel?: Selection;
 
   private _unsub?: () => void;
 
@@ -217,6 +236,8 @@ export class NotAPlcPanel extends LitElement {
   private async _onService(e: Event): Promise<void> {
     this._service = (e.target as HTMLSelectElement).value;
     this._stateImage = {};
+    this._sel = undefined;
+    this._tool = undefined;
     await this._loadProgram();
     await this._subscribe();
   }
@@ -411,7 +432,14 @@ export class NotAPlcPanel extends LitElement {
         <section class="edit">
           ${this._renderTags()}
           ${this._renderFbs()}
-          ${this._renderStructure()}
+          <details open>
+            <summary>Canvas editor (click-to-place)</summary>
+            ${this._renderCanvas()}
+          </details>
+          <details>
+            <summary>Structure editor (forms)</summary>
+            ${this._renderStructure()}
+          </details>
           <details>
             <summary>Advanced: edit as text (DSL)</summary>
             <textarea spellcheck="false" .value=${this._text}></textarea>
@@ -990,6 +1018,237 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
+  // --- click-to-place canvas (phase 4.4) ----------------------------------
+
+  private _tools(): Tool[] {
+    const tools: Tool[] = [
+      { label: "] [", target: "element", make: () => newContact() },
+      { label: "]/[", target: "element", make: () => newContact("", "NC") },
+      { label: "[ > ]", target: "element", make: () => newCompare() },
+      { label: "OR", target: "element", make: () => newBranch() },
+      { label: "NOT", target: "element", make: () => newNot() },
+      { label: "( )", target: "coil", make: () => newCoil() },
+    ];
+    const fb = this._fbNames()[0];
+    if (fb) {
+      tools.splice(5, 0, {
+        label: "FB",
+        target: "element",
+        make: () => newFbRef(fb),
+      });
+    }
+    return tools;
+  }
+
+  private _armTool(tool?: Tool): void {
+    this._tool = this._tool?.label === tool?.label ? undefined : tool;
+    this._sel = undefined;
+  }
+
+  private _sameSteps(a: SeriesStep[], b: SeriesStep[]): boolean {
+    return (
+      a.length === b.length &&
+      a.every((s, i) => s.index === b[i].index && s.path === b[i].path)
+    );
+  }
+
+  private _elementAt(
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+    ei: number,
+  ): Element | undefined {
+    let series = this._program?.networks[ni]?.rungs[ri]?.series;
+    for (const step of steps) {
+      const el = series?.[step.index];
+      if (!el || !isBranch(el)) return undefined;
+      series = el.branch[step.path];
+    }
+    return series?.[ei];
+  }
+
+  private _placeElement(ni: number, ri: number, steps: SeriesStep[], index: number): void {
+    const tool = this._tool;
+    if (!this._program || tool?.target !== "element") return;
+    const el = tool.make() as Element;
+    this._update(insertElementIn(this._program, ni, ri, steps, index, el));
+  }
+
+  private _placeCoil(ni: number, ri: number, index: number): void {
+    const tool = this._tool;
+    if (!this._program || tool?.target !== "coil") return;
+    const coil = tool.make() as Coil;
+    this._update(insertCoil(this._program, ni, ri, index, coil));
+  }
+
+  private _selectEl(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
+    if (this._tool) return; // placing, not selecting
+    this._sel = { kind: "el", ni, ri, steps, ei };
+  }
+
+  private _selectCoil(ni: number, ri: number, ci: number): void {
+    if (this._tool) return;
+    this._sel = { kind: "coil", ni, ri, ci };
+  }
+
+  private _renderCanvas(): TemplateResult {
+    if (!this._program) return html``;
+    return html`
+      <div class="tags-header">
+        <h3>Canvas <span class="beta">beta</span></h3>
+        <div class="tags-actions">
+          <button class="secondary" @click=${() => this._edit(addNetwork)}>
+            + Network
+          </button>
+          <button @click=${this._saveProgram}>Save</button>
+        </div>
+      </div>
+      <div class="palette">
+        <span class="palette-label">Place:</span>
+        ${this._tools().map(
+          (t) => html`<button
+            class="chip ${this._tool?.label === t.label ? "armed" : ""}"
+            @click=${() => this._armTool(t)}
+          >
+            ${t.label}
+          </button>`,
+        )}
+        <button
+          class="chip ${this._tool ? "" : "armed"}"
+          @click=${() => this._armTool(undefined)}
+        >
+          Select
+        </button>
+      </div>
+      <div class="hint">
+        ${this._tool
+          ? `Click a ＋ slot to place “${this._tool.label}”.`
+          : "Click an element to edit it below."}
+      </div>
+      ${this._program.networks.map((net, ni) => this._renderCanvasNetwork(net, ni))}
+      ${this._renderInspector()}
+    `;
+  }
+
+  private _renderCanvasNetwork(net: Network, ni: number): TemplateResult {
+    return html`
+      <div class="cv-net">
+        <div class="cv-net-head">
+          <span class="chip-id">${net.id}</span>
+          ${net.title ? html`<span>${net.title}</span>` : ""}
+          <span class="spacer"></span>
+          <button class="secondary small" @click=${() => this._edit((p) => addRung(p, ni))}>
+            + Rung
+          </button>
+        </div>
+        ${net.rungs.map((rung, ri) => this._renderCanvasRung(rung, ni, ri))}
+      </div>
+    `;
+  }
+
+  private _renderCanvasRung(rung: Rung, ni: number, ri: number): TemplateResult {
+    const flow: TemplateResult[] = [];
+    rung.series.forEach((el, ei) => {
+      flow.push(this._slot(ni, ri, [], ei));
+      flow.push(this._tile(el, ni, ri, [], ei));
+    });
+    flow.push(this._slot(ni, ri, [], rung.series.length));
+
+    const coils: TemplateResult[] = [];
+    rung.coils.forEach((c, ci) => {
+      coils.push(this._coilSlot(ni, ri, ci));
+      coils.push(this._coilTile(c, ni, ri, ci));
+    });
+    coils.push(this._coilSlot(ni, ri, rung.coils.length));
+
+    return html`
+      <div class="cv-rung">
+        <span class="chip-id">${rung.id}</span>
+        <div class="cv-rail"></div>
+        <div class="cv-flow">${flow}</div>
+        <div class="cv-arrow">▸</div>
+        <div class="cv-coil-col">${coils}</div>
+      </div>
+    `;
+  }
+
+  private _slot(ni: number, ri: number, steps: SeriesStep[], index: number): TemplateResult {
+    const active = this._tool?.target === "element";
+    return html`<button
+      class="cv-slot ${active ? "active" : ""}"
+      ?disabled=${!active}
+      title="Insert here"
+      @click=${() => this._placeElement(ni, ri, steps, index)}
+    >
+      ${active ? "＋" : ""}
+    </button>`;
+  }
+
+  private _tile(el: Element, ni: number, ri: number, steps: SeriesStep[], ei: number): TemplateResult {
+    const selected =
+      this._sel?.kind === "el" &&
+      this._sel.ni === ni &&
+      this._sel.ri === ri &&
+      this._sel.ei === ei &&
+      this._sameSteps(this._sel.steps, steps);
+    return html`<button
+      class="cv-tile ${selected ? "sel" : ""}"
+      @click=${() => this._selectEl(ni, ri, steps, ei)}
+    >
+      ${elementLabel(el, this._program?.fbs ?? {})}
+    </button>`;
+  }
+
+  private _coilSlot(ni: number, ri: number, index: number): TemplateResult {
+    const active = this._tool?.target === "coil";
+    return html`<button
+      class="cv-slot ${active ? "active" : ""}"
+      ?disabled=${!active}
+      title="Insert coil here"
+      @click=${() => this._placeCoil(ni, ri, index)}
+    >
+      ${active ? "＋" : ""}
+    </button>`;
+  }
+
+  private _coilTile(coil: Coil, ni: number, ri: number, ci: number): TemplateResult {
+    const selected =
+      this._sel?.kind === "coil" &&
+      this._sel.ni === ni &&
+      this._sel.ri === ri &&
+      this._sel.ci === ci;
+    return html`<button
+      class="cv-tile coil ${selected ? "sel" : ""}"
+      @click=${() => this._selectCoil(ni, ri, ci)}
+    >
+      ( ${coil.mode ?? "="} ${coil.tag || "?"} )
+    </button>`;
+  }
+
+  private _renderInspector(): TemplateResult {
+    if (!this._sel || !this._program) return html``;
+    if (this._sel.kind === "el") {
+      const { ni, ri, steps, ei } = this._sel;
+      const el = this._elementAt(ni, ri, steps, ei);
+      if (!el) return html``;
+      return html`
+        <div class="inspector">
+          <div class="col-label">Selected element</div>
+          ${this._renderSeriesElement(el, ni, ri, steps, ei)}
+        </div>
+      `;
+    }
+    const { ni, ri, ci } = this._sel;
+    const coil = this._program.networks[ni]?.rungs[ri]?.coils[ci];
+    if (!coil) return html``;
+    return html`
+      <div class="inspector">
+        <div class="col-label">Selected coil</div>
+        ${this._renderCoilEditor(coil, ni, ri, ci)}
+      </div>
+    `;
+  }
+
   private _renderPreview(): TemplateResult {
     if (!this._program) return html`<div class="hint">Loading…</div>`;
     if (this._program.networks.length === 0) {
@@ -1307,6 +1566,119 @@ export class NotAPlcPanel extends LitElement {
     .hint {
       color: var(--secondary-text-color);
       padding: 16px;
+    }
+    .beta {
+      font-size: 0.6em;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-primary-color, #fff);
+      background: var(--primary-color);
+      border-radius: 4px;
+      padding: 1px 5px;
+      vertical-align: middle;
+    }
+    .palette {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin: 6px 0;
+    }
+    .palette-label {
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+    }
+    button.chip.armed {
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+      outline: 2px solid var(--primary-color);
+    }
+    .cv-net {
+      border: 1px solid var(--divider-color, #ddd);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 10px 0;
+    }
+    .cv-net-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .cv-rung {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 0;
+      border-top: 1px solid var(--divider-color, #eee);
+      overflow-x: auto;
+    }
+    .cv-rail {
+      width: 3px;
+      align-self: stretch;
+      min-height: 28px;
+      background: var(--primary-text-color);
+      border-radius: 2px;
+    }
+    .cv-flow {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
+    }
+    .cv-arrow {
+      color: var(--secondary-text-color);
+    }
+    .cv-coil-col {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 2px;
+    }
+    .cv-slot {
+      min-width: 16px;
+      height: 30px;
+      border: none;
+      background: none;
+      color: var(--primary-color);
+      cursor: default;
+      padding: 0;
+      font-size: 1.1em;
+    }
+    .cv-slot.active {
+      cursor: pointer;
+      border: 1px dashed var(--primary-color);
+      border-radius: 4px;
+      min-width: 22px;
+    }
+    .cv-slot.active:hover {
+      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+    }
+    .cv-tile {
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.9em;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .cv-tile.coil {
+      border-style: solid;
+      border-color: var(--divider-color, #bbb);
+    }
+    .cv-tile.sel {
+      outline: 2px solid var(--primary-color);
+      border-color: var(--primary-color);
+    }
+    .inspector {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--primary-color);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--primary-color) 6%, transparent);
     }
     .rail {
       stroke: var(--primary-text-color);

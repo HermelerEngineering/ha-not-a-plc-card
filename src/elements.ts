@@ -228,6 +228,22 @@ export function addElementIn(
   return editSeriesAt(program, ni, ri, steps, (s) => [...s, el]);
 }
 
+/** Insert an element at position `index` in the series at `steps`. */
+export function insertElementIn(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  index: number,
+  el: Element,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) => [
+    ...s.slice(0, index),
+    el,
+    ...s.slice(index),
+  ]);
+}
+
 export function removeElementIn(
   program: Program,
   ni: number,
@@ -314,6 +330,20 @@ export function addCoil(
   coil: Coil,
 ): Program {
   return updateRungAt(program, ni, ri, (r) => ({ ...r, coils: [...r.coils, coil] }));
+}
+
+/** Insert a coil at position `index` in the rung's coil list. */
+export function insertCoil(
+  program: Program,
+  ni: number,
+  ri: number,
+  index: number,
+  coil: Coil,
+): Program {
+  return updateRungAt(program, ni, ri, (r) => ({
+    ...r,
+    coils: [...r.coils.slice(0, index), coil, ...r.coils.slice(index)],
+  }));
 }
 
 export function removeCoil(

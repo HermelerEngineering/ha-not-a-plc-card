@@ -653,6 +653,7 @@ export class NotAPlcPanel extends LitElement {
   ): TemplateResult {
     return html`
       <select
+        .value=${value}
         @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
         <option value="" ?selected=${value === ""}>—</option>
@@ -695,6 +696,7 @@ export class NotAPlcPanel extends LitElement {
         <span class="el-type">contact</span>
         ${this._tagSelect(c.tag, this._tagNames(), (v) => set({ ...c, tag: v }))}
         <select
+          .value=${c.mode ?? "NO"}
           @change=${(e: Event) =>
             set({ ...c, mode: (e.target as HTMLSelectElement).value as ContactMode })}
         >
@@ -714,6 +716,7 @@ export class NotAPlcPanel extends LitElement {
           (v) => set({ ...c, left: v }),
         )}
         <select
+          .value=${c.op}
           @change=${(e: Event) =>
             set({ ...c, op: (e.target as HTMLSelectElement).value as CompareOp })}
         >
@@ -771,6 +774,7 @@ export class NotAPlcPanel extends LitElement {
           (v) => set({ ...coil, tag: v }),
         )}
         <select
+          .value=${coil.mode ?? "="}
           @change=${(e: Event) =>
             set({ ...coil, mode: (e.target as HTMLSelectElement).value as CoilMode })}
         >

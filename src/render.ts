@@ -307,13 +307,17 @@ function renderRung(
   state: StateImage,
 ): { part: SVGTemplateResult; height: number } {
   const measure = measureSeries(rung.series);
+  // The rung is as tall as its widest need: the series' branch rows or, when
+  // there are several coils, the stacked coil rows (first coil on the baseline,
+  // extra coils below like parallel branch paths).
+  const rows = Math.max(measure.rows, rung.coils.length);
   const painter = new RungPainter(baseY, flow, fbs, state);
   const baselineY = rowY(baseY, 0);
 
   // Left rail is always powered; draw it and a live stub that connects the rail
   // to the first element (no gap between the rail and the energised wire).
   painter.parts.push(
-    svg`<line x1=${PAD} y1=${baseY} x2=${PAD} y2=${baseY + measure.rows * CELL_H} class="rail" />`,
+    svg`<line x1=${PAD} y1=${baseY} x2=${PAD} y2=${baseY + rows * CELL_H} class="rail" />`,
   );
   painter.parts.push(
     svg`<line x1=${PAD} y1=${baselineY} x2=${colX(0)} y2=${baselineY} class="wire live" />`,
@@ -325,11 +329,18 @@ function renderRung(
   painter.parts.push(
     svg`<line x1=${colX(res.endCol)} y1=${baselineY} x2=${coilX} y2=${baselineY} class=${wireClass(res.poweredOut)} />`,
   );
+  // Vertical bus down the coil column so stacked coils share the rung's power.
+  if (rung.coils.length > 1) {
+    const busBottom = baselineY + (rung.coils.length - 1) * CELL_H;
+    painter.parts.push(
+      svg`<line x1=${coilX} y1=${baselineY} x2=${coilX} y2=${busBottom} class=${wireClass(res.poweredOut)} />`,
+    );
+  }
   rung.coils.forEach((coil, i) => {
     const cf = flow.coils.get(coil);
     const energised = cf?.energised ?? false;
     const value = cf?.value ?? false;
-    const cy = baselineY + i * 30 - (rung.coils.length - 1) * 15;
+    const cy = baselineY + i * CELL_H;
     const cx = coilX + 18;
     const cls = energised ? "coil live" : "coil";
     // Wire into the coil, then the coil drawn as a parenthesis pair "( )" as in
@@ -352,7 +363,7 @@ function renderRung(
     }
   });
 
-  const height = measure.rows * CELL_H;
+  const height = rows * CELL_H;
   return { part: svg`<g>${painter.parts}</g>`, height };
 }
 

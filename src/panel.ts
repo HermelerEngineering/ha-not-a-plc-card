@@ -11,10 +11,14 @@
  *     to an entity via a self-contained `<input>` + `<datalist>` picker (with type
  *     inference from the entity domain), set a coil's optional `writes` target and
  *     a memory tag's `retain` flag — then save (`save_program`),
+ *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
+ *     and rungs (with titles), and per rung add/remove/move/edit the top-level
+ *     series elements (contact, compare, fb reference) and coils via forms — then
+ *     save (`save_program`),
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
- * Structured editing of rung elements, and the drag-drop canvas, land in later
- * 4.x sub-phases.
+ * Editing the contents of a branch / NOT group (nested series) and the drag-drop
+ * canvas land in later 4.x sub-phases; those stay editable via the DSL for now.
  */
 
 import {
@@ -29,13 +33,49 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { HomeAssistant } from "./ha";
 import {
+  Coil,
+  CoilMode,
+  CompareEl,
+  CompareOp,
+  ContactEl,
+  ContactMode,
+  Element,
+  FbRefEl,
+  Network,
   Program,
+  Rung,
   ServiceInfo,
   StateImage,
   TagDef,
   TagKind,
   TagType,
+  isBranch,
+  isCompare,
+  isContact,
+  isFb,
+  isNot,
 } from "./ir";
+import {
+  addCoil,
+  addElement,
+  addNetwork,
+  addRung,
+  moveElement,
+  moveNetwork,
+  moveRung,
+  newCoil,
+  newCompare,
+  newContact,
+  newFbRef,
+  removeCoil,
+  removeElement,
+  removeNetwork,
+  removeRung,
+  setNetworkTitle,
+  setRungTitle,
+  updateCoil,
+  updateElement,
+} from "./elements";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
 import {
@@ -55,6 +95,10 @@ const VIEW_WIDTH = 720;
 
 const TAG_KINDS: TagKind[] = ["input", "coil", "memory", "temp"];
 const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];
+const COIL_MODES: CoilMode[] = ["=", "S", "R"];
+const CONTACT_MODES: ContactMode[] = ["NO", "NC"];
+const COMPARE_OPS: CompareOp[] = ["GT", "GE", "LT", "LE", "EQ", "NE"];
+const WRITABLE_KINDS = new Set<TagKind>(["coil", "memory", "temp"]);
 
 // We build our own entity picker from `hass.states` because HA's
 // `ha-entity-picker` is a lazy-loaded element that is not reliably defined
@@ -228,6 +272,25 @@ export class NotAPlcPanel extends LitElement {
     this._update(removeTag(this._program, name));
   }
 
+  // --- structure editing (phase 4.3) ------------------------------------
+
+  /** Apply a pure structure edit to the working program. */
+  private _edit(fn: (p: Program) => Program): void {
+    if (!this._program) return;
+    this._update(fn(this._program));
+  }
+
+  private _tagNames(pred?: (t: TagDef) => boolean): string[] {
+    if (!this._program) return [];
+    return Object.entries(this._program.tags)
+      .filter(([, t]) => (pred ? pred(t) : true))
+      .map(([name]) => name);
+  }
+
+  private _fbNames(): string[] {
+    return Object.keys(this._program?.fbs ?? {});
+  }
+
   private async _saveProgram(): Promise<void> {
     const conn = this.hass?.connection;
     if (!conn || !this._program) return;
@@ -288,6 +351,7 @@ export class NotAPlcPanel extends LitElement {
         <section class="preview">${this._renderPreview()}</section>
         <section class="edit">
           ${this._renderTags()}
+          ${this._renderStructure()}
           <details>
             <summary>Advanced: edit as text (DSL)</summary>
             <textarea spellcheck="false" .value=${this._text}></textarea>
@@ -445,6 +509,288 @@ export class NotAPlcPanel extends LitElement {
     return html`<span class="muted">—</span>`;
   }
 
+  // --- structure editor ---------------------------------------------------
+
+  private _renderStructure(): TemplateResult {
+    if (!this._program) return html``;
+    return html`
+      <div class="tags-header">
+        <h3>Program</h3>
+        <div class="tags-actions">
+          <button class="secondary" @click=${() => this._edit(addNetwork)}>
+            + Network
+          </button>
+          <button @click=${this._saveProgram}>Save</button>
+        </div>
+      </div>
+      ${this._program.networks.map((net, ni) => this._renderNetworkEditor(net, ni))}
+      ${this._program.networks.length === 0
+        ? html`<div class="hint">No networks yet — add one.</div>`
+        : ""}
+    `;
+  }
+
+  private _moveButtons(up: () => void, down: () => void): TemplateResult {
+    return html`
+      <button class="icon" title="Move up" @click=${up}>↑</button>
+      <button class="icon" title="Move down" @click=${down}>↓</button>
+    `;
+  }
+
+  private _renderNetworkEditor(net: Network, ni: number): TemplateResult {
+    return html`
+      <div class="net">
+        <div class="net-head">
+          <span class="chip-id">${net.id}</span>
+          <input
+            class="title-input"
+            placeholder="network title"
+            .value=${net.title ?? ""}
+            @change=${(e: Event) =>
+              this._edit((p) =>
+                setNetworkTitle(p, ni, (e.target as HTMLInputElement).value),
+              )}
+          />
+          <span class="spacer"></span>
+          ${this._moveButtons(
+            () => this._edit((p) => moveNetwork(p, ni, -1)),
+            () => this._edit((p) => moveNetwork(p, ni, 1)),
+          )}
+          <button
+            class="icon"
+            title="Delete network"
+            @click=${() => this._edit((p) => removeNetwork(p, ni))}
+          >
+            ✕
+          </button>
+        </div>
+        ${net.rungs.map((rung, ri) => this._renderRungEditor(rung, ni, ri))}
+        <button class="secondary small" @click=${() => this._edit((p) => addRung(p, ni))}>
+          + Rung
+        </button>
+      </div>
+    `;
+  }
+
+  private _renderRungEditor(rung: Rung, ni: number, ri: number): TemplateResult {
+    return html`
+      <div class="rung">
+        <div class="rung-head">
+          <span class="chip-id">${rung.id}</span>
+          <input
+            class="title-input"
+            placeholder="rung title"
+            .value=${rung.title ?? ""}
+            @change=${(e: Event) =>
+              this._edit((p) =>
+                setRungTitle(p, ni, ri, (e.target as HTMLInputElement).value),
+              )}
+          />
+          <span class="spacer"></span>
+          ${this._moveButtons(
+            () => this._edit((p) => moveRung(p, ni, ri, -1)),
+            () => this._edit((p) => moveRung(p, ni, ri, 1)),
+          )}
+          <button
+            class="icon"
+            title="Delete rung"
+            @click=${() => this._edit((p) => removeRung(p, ni, ri))}
+          >
+            ✕
+          </button>
+        </div>
+        <div class="rung-body">
+          <div class="col">
+            <div class="col-label">Series (AND)</div>
+            ${rung.series.map((el, ei) => this._renderSeriesElement(el, ni, ri, ei))}
+            <div class="add-row">
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addElement(p, ni, ri, newContact()))}
+              >
+                + Contact
+              </button>
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addElement(p, ni, ri, newCompare()))}
+              >
+                + Compare
+              </button>
+              ${this._fbNames().length
+                ? html`<button
+                    class="chip"
+                    @click=${() =>
+                      this._edit((p) =>
+                        addElement(p, ni, ri, newFbRef(this._fbNames()[0])),
+                      )}
+                  >
+                    + FB
+                  </button>`
+                : ""}
+            </div>
+          </div>
+          <div class="col">
+            <div class="col-label">Coils</div>
+            ${rung.coils.map((c, ci) => this._renderCoilEditor(c, ni, ri, ci))}
+            <div class="add-row">
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addCoil(p, ni, ri, newCoil()))}
+              >
+                + Coil
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private _tagSelect(
+    value: string,
+    names: string[],
+    onChange: (v: string) => void,
+  ): TemplateResult {
+    return html`
+      <select
+        @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+      >
+        <option value="" ?selected=${value === ""}>—</option>
+        ${names.map(
+          (n) => html`<option value=${n} ?selected=${n === value}>${n}</option>`,
+        )}
+      </select>
+    `;
+  }
+
+  private _elActions(ni: number, ri: number, ei: number): TemplateResult {
+    return html`
+      ${this._moveButtons(
+        () => this._edit((p) => moveElement(p, ni, ri, ei, -1)),
+        () => this._edit((p) => moveElement(p, ni, ri, ei, 1)),
+      )}
+      <button
+        class="icon"
+        title="Delete element"
+        @click=${() => this._edit((p) => removeElement(p, ni, ri, ei))}
+      >
+        ✕
+      </button>
+    `;
+  }
+
+  private _renderSeriesElement(
+    el: Element,
+    ni: number,
+    ri: number,
+    ei: number,
+  ): TemplateResult {
+    const set = (next: Element) =>
+      this._edit((p) => updateElement(p, ni, ri, ei, next));
+
+    let body: TemplateResult;
+    if (isContact(el)) {
+      const c = el as ContactEl;
+      body = html`
+        <span class="el-type">contact</span>
+        ${this._tagSelect(c.tag, this._tagNames(), (v) => set({ ...c, tag: v }))}
+        <select
+          @change=${(e: Event) =>
+            set({ ...c, mode: (e.target as HTMLSelectElement).value as ContactMode })}
+        >
+          ${CONTACT_MODES.map(
+            (m) =>
+              html`<option value=${m} ?selected=${m === (c.mode ?? "NO")}>${m}</option>`,
+          )}
+        </select>
+      `;
+    } else if (isCompare(el)) {
+      const c = el as CompareEl;
+      body = html`
+        <span class="el-type">compare</span>
+        ${this._tagSelect(
+          c.left,
+          this._tagNames((t) => t.type === "REAL"),
+          (v) => set({ ...c, left: v }),
+        )}
+        <select
+          @change=${(e: Event) =>
+            set({ ...c, op: (e.target as HTMLSelectElement).value as CompareOp })}
+        >
+          ${COMPARE_OPS.map(
+            (o) => html`<option value=${o} ?selected=${o === c.op}>${o}</option>`,
+          )}
+        </select>
+        <input
+          class="right-input"
+          .value=${String(c.right)}
+          placeholder="value or tag"
+          @change=${(e: Event) =>
+            set({ ...c, right: this._parseRight((e.target as HTMLInputElement).value) })}
+        />
+      `;
+    } else if (isFb(el)) {
+      const f = el as FbRefEl;
+      body = html`
+        <span class="el-type">fb</span>
+        ${this._tagSelect(f.instance, this._fbNames(), (v) =>
+          set({ ...f, instance: v }),
+        )}
+      `;
+    } else if (isBranch(el)) {
+      body = html`<span class="el-type">branch</span>
+        <span class="muted">edit nested paths via DSL</span>`;
+    } else if (isNot(el)) {
+      body = html`<span class="el-type">NOT</span>
+        <span class="muted">edit inner series via DSL</span>`;
+    } else {
+      body = html`<span class="muted">unknown element</span>`;
+    }
+
+    return html`<div class="el-row">${body}<span class="spacer"></span>${this._elActions(ni, ri, ei)}</div>`;
+  }
+
+  private _parseRight(raw: string): number | string {
+    const trimmed = raw.trim();
+    const num = Number(trimmed);
+    return trimmed !== "" && !Number.isNaN(num) ? num : raw;
+  }
+
+  private _renderCoilEditor(
+    coil: Coil,
+    ni: number,
+    ri: number,
+    ci: number,
+  ): TemplateResult {
+    const set = (next: Coil) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
+    return html`
+      <div class="el-row">
+        ${this._tagSelect(
+          coil.tag,
+          this._tagNames((t) => WRITABLE_KINDS.has(t.kind)),
+          (v) => set({ ...coil, tag: v }),
+        )}
+        <select
+          @change=${(e: Event) =>
+            set({ ...coil, mode: (e.target as HTMLSelectElement).value as CoilMode })}
+        >
+          ${COIL_MODES.map(
+            (m) =>
+              html`<option value=${m} ?selected=${m === (coil.mode ?? "=")}>${m}</option>`,
+          )}
+        </select>
+        <span class="spacer"></span>
+        <button
+          class="icon"
+          title="Delete coil"
+          @click=${() => this._edit((p) => removeCoil(p, ni, ri, ci))}
+        >
+          ✕
+        </button>
+      </div>
+    `;
+  }
+
   private _renderPreview(): TemplateResult {
     if (!this._program) return html`<div class="hint">Loading…</div>`;
     if (this._program.networks.length === 0) {
@@ -593,6 +939,102 @@ export class NotAPlcPanel extends LitElement {
     }
     button.icon:hover {
       color: var(--error-color, #db4437);
+    }
+    button.small {
+      padding: 4px 10px;
+      font-size: 0.85em;
+      margin-top: 6px;
+    }
+    .net {
+      border: 1px solid var(--divider-color, #ddd);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 10px 0;
+    }
+    .net-head,
+    .rung-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .chip-id {
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+      background: var(--secondary-background-color, #eee);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .title-input {
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 4px;
+      padding: 4px 6px;
+      min-width: 120px;
+    }
+    .rung {
+      border-left: 3px solid var(--divider-color, #ddd);
+      padding: 6px 0 6px 10px;
+      margin: 8px 0;
+    }
+    .rung-body {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    @media (max-width: 700px) {
+      .rung-body {
+        grid-template-columns: 1fr;
+      }
+    }
+    .col-label {
+      font-size: 0.75em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--secondary-text-color);
+      margin-bottom: 4px;
+    }
+    .el-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+    }
+    .el-row select,
+    .el-row input {
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 4px;
+      padding: 3px 5px;
+    }
+    .el-type {
+      font-size: 0.7em;
+      text-transform: uppercase;
+      color: var(--secondary-text-color);
+      min-width: 48px;
+    }
+    .right-input {
+      width: 90px;
+    }
+    .add-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    button.chip {
+      background: var(--secondary-background-color, #e8e8e8);
+      color: var(--primary-text-color);
+      padding: 3px 10px;
+      font-size: 0.85em;
     }
     details {
       margin-top: 12px;

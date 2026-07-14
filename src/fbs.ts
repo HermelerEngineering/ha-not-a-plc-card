@@ -14,12 +14,10 @@ import {
   CompareEl,
   Element,
   FunctionBlockDef,
-  NotEl,
   Program,
   isBranch,
   isCompare,
   isFb,
-  isNot,
 } from "./ir";
 
 export const EDGE_TYPES = ["R_TRIG", "F_TRIG"];
@@ -145,8 +143,7 @@ export function isFbReferenced(program: Program, name: string): boolean {
       return operandInstance(el.left) === name || operandInstance(el.right) === name;
     }
     if (isBranch(el)) return el.branch.some((p) => p.some(inElement));
-    if (isNot(el)) return el.not.some(inElement);
-    return false;
+    return false; // NOT is an inline leaf — no instance reference
   };
   return program.networks.some((net) =>
     net.rungs.some((rung) => rung.series.some(inElement)),
@@ -185,13 +182,7 @@ function renameInElement(el: Element, oldName: string, newName: string): Element
     };
     return next;
   }
-  if (isNot(el)) {
-    const next: NotEl = {
-      not: el.not.map((sub) => renameInElement(sub, oldName, newName)),
-    };
-    return next;
-  }
-  return el;
+  return el; // NOT is an inline leaf — no instance reference to rewrite
 }
 
 /**

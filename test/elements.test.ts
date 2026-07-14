@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Program } from "../src/ir";
-import {
-  BranchEl,
-  ContactEl,
-  NotEl,
-} from "../src/ir";
+import { BranchEl, ContactEl } from "../src/ir";
 import {
   addCoil,
   addElement,
@@ -161,9 +157,9 @@ function progNested(): Program {
 }
 
 describe("constructors newBranch / newNot", () => {
-  it("build empty containers ready to fill", () => {
+  it("build a fresh branch and an inline NOT", () => {
     expect(newBranch()).toEqual({ branch: [[], []] });
-    expect(newNot()).toEqual({ not: [] });
+    expect(newNot()).toEqual({ type: "not" });
   });
 });
 
@@ -189,19 +185,11 @@ describe("nested series editing (SeriesStep path)", () => {
     expect(branch.branch[1]).toHaveLength(0);
   });
 
-  it("adds inside a NOT group's inner series", () => {
-    const base: Program = {
-      tags: { a: { kind: "input", type: "BOOL", source: "binary_sensor.a" } },
-      networks: [
-        {
-          id: "n1",
-          rungs: [{ id: "r1", series: [newNot()], coils: [newCoil("a")] }],
-        },
-      ],
-    };
-    const p = addElementIn(base, 0, 0, [{ index: 0 }], newContact("a"));
-    const not = p.networks[0].rungs[0].series[0] as NotEl;
-    expect(not.not).toHaveLength(1);
-    expect((not.not[0] as ContactEl).tag).toBe("a");
+  it("adds an inline NOT into a branch path alongside contacts", () => {
+    // NOT is a leaf now: it just sits in the series like any other element.
+    const p = addElementIn(progNested(), 0, 0, [{ index: 0, path: 1 }], newNot());
+    const branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect(branch.branch[1]).toHaveLength(1);
+    expect(branch.branch[1][0]).toEqual({ type: "not" });
   });
 });

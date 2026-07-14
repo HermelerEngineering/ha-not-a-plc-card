@@ -27,7 +27,6 @@ import {
   Program,
   Rung,
   isBranch,
-  isNot,
 } from "./ir";
 
 // --- immutable array helpers ------------------------------------------------
@@ -178,13 +177,14 @@ function updateRungAt(
 }
 
 /**
- * One hop into a nested series: into a branch's path `path`, or into a NOT
- * group's inner series (`path` omitted). A `SeriesStep[]` addresses a series
- * array reachable from the rung's top-level series (an empty array = top level).
+ * One hop into a nested series: `index` selects a branch element in the current
+ * series, `path` its OR-path. A `SeriesStep[]` addresses a series array reachable
+ * from the rung's top-level series (an empty array = top level). NOT is now an
+ * inline leaf (not a container), so branches are the only nesting.
  */
 export interface SeriesStep {
   index: number;
-  path?: number;
+  path: number;
 }
 
 /** Rewrite the series array located at `steps` (from the rung's top series). */
@@ -196,11 +196,7 @@ function mapSeriesAt(
   if (steps.length === 0) return fn(series);
   const [step, ...rest] = steps;
   return series.map((el, i) => {
-    if (i !== step.index) return el;
-    if (step.path === undefined) {
-      return isNot(el) ? { not: mapSeriesAt(el.not, rest, fn) } : el;
-    }
-    if (!isBranch(el)) return el;
+    if (i !== step.index || !isBranch(el)) return el;
     return {
       branch: el.branch.map((p, pi) =>
         pi === step.path ? mapSeriesAt(p, rest, fn) : p,
@@ -308,7 +304,7 @@ export function newBranch(): BranchEl {
 }
 
 export function newNot(): NotEl {
-  return { not: [] };
+  return { type: "not" };
 }
 
 export function addCoil(

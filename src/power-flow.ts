@@ -89,40 +89,31 @@ function contactConducts(tag: string, mode: string | undefined, state: StateImag
   return mode === "NC" ? !s : s;
 }
 
-/** Whether an element conducts, ignoring upstream power (engine semantics). */
+/** Whether a stateless gate element conducts (contact / compare / fb / branch).
+ *
+ * `Not` (an inline power inverter) has no standalone conduct — it is handled by
+ * the series fold — so it is not evaluated here.
+ */
 export function elementConducts(el: Element, state: StateImage): boolean {
   if (isContact(el)) return contactConducts(el.tag, el.mode, state);
   if (isCompare(el)) return compareConducts(el, state);
   // A function block conducts on its output Q, which the server publishes in the
   // state image under the instance name (the card cannot recompute stateful Q).
   if (isFb(el)) return truthy(state[el.instance]);
-  if (isNot(el)) return !seriesConducts(el.not, state);
-  return el.branch.some((path) => seriesConducts(path, state));
+  if (isBranch(el)) return el.branch.some((path) => seriesConducts(path, state));
+  return false; // NotEl — folded in seriesConducts, never gated on its own
 }
 
-/** Whether a series chain conducts. An empty chain conducts (matches engine). */
+/** Whether a series chain conducts (left-to-right fold; NOT inverts). */
 export function seriesConducts(els: Element[], state: StateImage): boolean {
-  return els.every((el) => elementConducts(el, state));
-}
-
-/** Annotate elements for display only: `live` mirrors their own conduct. */
-function annotateInformational(
-  els: Element[],
-  state: StateImage,
-  out: Map<Element, ElementFlow>,
-): void {
+  let power = true;
   for (const el of els) {
-    const conducts = elementConducts(el, state);
-    out.set(el, { conducts, live: conducts });
-    if (isNot(el)) {
-      annotateInformational(el.not, state, out);
-    } else if (isBranch(el)) {
-      for (const path of el.branch) annotateInformational(path, state, out);
-    }
+    power = isNot(el) ? !power : power && elementConducts(el, state);
   }
+  return power;
 }
 
-/** Propagate power through one element; return whether power leaves it live. */
+/** Propagate power through one gate element; return whether power leaves it. */
 function flowElement(
   el: Element,
   state: StateImage,
@@ -141,10 +132,6 @@ function flowElement(
     // Each path receives the branch's incoming power; a path lights up as far
     // as power actually flows along it.
     for (const path of el.branch) flowSeries(path, state, poweredIn, out);
-  } else if (isNot(el)) {
-    // The negation itself carries the power; inner contacts are shown purely
-    // as information (their own conduct), not as a power path.
-    annotateInformational(el.not, state, out);
   }
   return live;
 }
@@ -158,7 +145,14 @@ function flowSeries(
 ): boolean {
   let powered = poweredIn;
   for (const el of els) {
-    powered = flowElement(el, state, powered, out);
+    if (isNot(el)) {
+      // Inline inverter: flip the running power. Its own output is what leaves.
+      const live = !powered;
+      out.set(el, { conducts: live, live });
+      powered = live;
+    } else {
+      powered = flowElement(el, state, powered, out);
+    }
   }
   return powered;
 }

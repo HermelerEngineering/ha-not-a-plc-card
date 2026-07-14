@@ -38,8 +38,8 @@ export interface BranchEl {
 }
 
 export interface NotEl {
-  /** Negation of an inner series chain. */
-  not: Element[];
+  /** Inline power inverter: flips the running series power at its position. */
+  type: "not";
 }
 
 export interface CompareEl {
@@ -110,7 +110,7 @@ export function isBranch(el: Element): el is BranchEl {
 }
 
 export function isNot(el: Element): el is NotEl {
-  return Array.isArray((el as NotEl).not);
+  return (el as NotEl).type === "not";
 }
 
 export function isCompare(el: Element): el is CompareEl {

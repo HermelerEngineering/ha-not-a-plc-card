@@ -49,10 +49,15 @@ describe("elementConducts", () => {
     expect(elementConducts(branch, { a: false, b: true })).toBe(true);
   });
 
-  it("negates an inner series for NOT", () => {
-    const not: NotEl = { not: [NO("a")] };
-    expect(elementConducts(not, { a: true })).toBe(false);
-    expect(elementConducts(not, { a: false })).toBe(true);
+  it("treats an inline NOT as inverting the running series power", () => {
+    const not: NotEl = { type: "not" };
+    // On its own a NOT has no standalone conduct (it is folded in a series).
+    expect(elementConducts(not, {})).toBe(false);
+    // In a series it flips the accumulated power: `a NOT` conducts !a.
+    expect(seriesConducts([NO("a"), not], { a: true })).toBe(false);
+    expect(seriesConducts([NO("a"), not], { a: false })).toBe(true);
+    // `(a) NOT` after a conducting branch → NOR-like inversion.
+    expect(seriesConducts([not], {})).toBe(false); // empty-so-far conducts → !true
   });
 
   it("evaluates comparators like the engine", () => {

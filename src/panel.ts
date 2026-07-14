@@ -16,9 +16,9 @@
  *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
  *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
  *     and rungs (with titles), and per rung add/remove/move/edit the series elements
- *     — contact, compare, fb reference, and nested branch (OR) / NOT groups, edited
- *     recursively to any depth — plus coils, all via forms, then save
- *     (`save_program`),
+ *     — contact, compare, fb reference, an inline NOT power inverter, and nested
+ *     branch (OR) groups edited recursively to any depth — plus coils, all via
+ *     forms, then save (`save_program`),
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  *
  * The drag-drop canvas lands in a later 4.x sub-phase.
@@ -47,7 +47,6 @@ import {
   FbRefEl,
   FunctionBlockDef,
   Network,
-  NotEl,
   Program,
   Rung,
   ServiceInfo,
@@ -888,22 +887,6 @@ export class NotAPlcPanel extends LitElement {
       `;
     }
 
-    if (isNot(el)) {
-      const n = el as NotEl;
-      return html`
-        <div class="nested">
-          <div class="el-row">
-            <span class="el-type">NOT</span>
-            <span class="spacer"></span>
-            ${this._elActions(ni, ri, steps, ei)}
-          </div>
-          <div class="path">
-            ${this._renderSeries(n.not, ni, ri, [...steps, { index: ei }])}
-          </div>
-        </div>
-      `;
-    }
-
     let body: TemplateResult;
     if (isContact(el)) {
       const c = el as ContactEl;
@@ -955,6 +938,9 @@ export class NotAPlcPanel extends LitElement {
           set({ ...f, instance: v }),
         )}
       `;
+    } else if (isNot(el)) {
+      body = html`<span class="el-type">NOT</span>
+        <span class="muted">inverts the running power</span>`;
     } else {
       body = html`<span class="muted">unknown element</span>`;
     }

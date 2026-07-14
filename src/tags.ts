@@ -16,7 +16,6 @@ import {
   CompareEl,
   Element,
   FunctionBlockDef,
-  NotEl,
   Program,
   TagDef,
   TagKind,
@@ -24,7 +23,6 @@ import {
   isBranch,
   isCompare,
   isContact,
-  isNot,
 } from "./ir";
 
 /** Entity domains offered per tag type. See project-plan §3a. */
@@ -85,8 +83,8 @@ export function isTagReferenced(program: Program, name: string): boolean {
     if (isContact(el)) return el.tag === name;
     if (isCompare(el)) return el.left === name || el.right === name;
     if (isBranch(el)) return el.branch.some((p) => p.some(inElement));
-    if (isNot(el)) return el.not.some(inElement);
-    return false; // FbRef references an fb instance, not a tag
+    // NOT is an inline leaf and FbRef references an fb instance — neither a tag.
+    return false;
   };
   for (const net of program.networks) {
     for (const rung of net.rungs) {
@@ -119,13 +117,7 @@ function renameInElement(el: Element, oldName: string, newName: string): Element
     };
     return next;
   }
-  if (isNot(el)) {
-    const next: NotEl = {
-      not: el.not.map((sub) => renameInElement(sub, oldName, newName)),
-    };
-    return next;
-  }
-  return el;
+  return el; // NOT (inline leaf) and FbRef carry no tag reference
 }
 
 /**

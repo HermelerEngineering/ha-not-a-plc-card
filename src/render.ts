@@ -65,7 +65,7 @@ function measureElement(el: Element): Measure {
   if (isContact(el)) return { cols: 1, rows: 1 };
   if (isCompare(el)) return { cols: 1, rows: 1 };
   if (isFb(el)) return { cols: 1, rows: 1 };
-  if (isNot(el)) return measureSeries(el.not);
+  if (isNot(el)) return { cols: 1, rows: 1 };
   let cols = 1;
   let rows = 0;
   for (const path of el.branch) {
@@ -256,15 +256,25 @@ class RungPainter {
   }
 
   private drawNot(el: NotEl, col: number, row: number, powered: boolean): DrawResult {
+    // Inline inverter: a small box whose output (live) is the negated input.
     const flow = this.flow.elements.get(el);
     const live = flow?.live ?? false;
-    // Draw the inner series informationally; the NOT itself carries the power.
-    const res = this.drawSeries(el.not, col, row, powered);
     const y = rowY(this.baseY, row);
-    const bar = y - 26;
-    this.line(colX(col) + 6, bar, colX(res.endCol) - 6, bar, live);
-    this.label(colX(col) + 12, bar - 4, "NOT", "mode");
-    return { endCol: res.endCol, poweredOut: live };
+    const left = colX(col);
+    const right = colX(col + 1);
+    const mid = (left + right) / 2;
+    const boxW = 40;
+    const boxH = 24;
+
+    this.line(left, y, mid - boxW / 2, y, powered);
+    this.line(mid + boxW / 2, y, right, y, live);
+
+    const cls = live ? "symbol live" : "symbol";
+    this.parts.push(
+      svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+    );
+    this.label(mid, y + 4, "NOT", "fb-text");
+    return { endCol: col + 1, poweredOut: live };
   }
 
   private drawBranch(el: BranchEl, col: number, row: number, powered: boolean): DrawResult {

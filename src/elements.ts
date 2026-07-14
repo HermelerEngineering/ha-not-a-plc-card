@@ -45,10 +45,10 @@ function moveItem<T>(arr: T[], i: number, delta: number): T[] {
   return next;
 }
 
-/** A fresh `<prefix><n>` id not present in `existing`. */
+/** The lowest-numbered fresh `<prefix><n>` id (n≥1) not present in `existing`. */
 export function freshId(existing: string[], prefix: string): string {
-  let n = existing.length + 1;
   const taken = new Set(existing);
+  let n = 1;
   while (taken.has(`${prefix}${n}`)) n += 1;
   return `${prefix}${n}`;
 }

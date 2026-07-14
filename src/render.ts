@@ -341,7 +341,9 @@ function renderRung(
     const energised = cf?.energised ?? false;
     const value = cf?.value ?? false;
     const cy = baselineY + i * CELL_H;
-    const cx = coilX + 18;
+    // Sit the coil about half a cell right of the bus, so the stub matches the
+    // spacing used between a branch bus and its parallel contacts.
+    const cx = coilX + CELL_W / 2;
     const cls = energised ? "coil live" : "coil";
     // Wire into the coil, then the coil drawn as a parenthesis pair "( )" as in
     // common PLC packages. S/R modes show the letter between the parentheses.

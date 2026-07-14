@@ -11,6 +11,9 @@
  *     to an entity via a self-contained `<input>` + `<datalist>` picker (with type
  *     inference from the entity domain), set a coil's optional `writes` target and
  *     a memory tag's `retain` flag — then save (`save_program`),
+ *   - lets you manage *function-block instances* (phase 4.3): add/remove/rename
+ *     them and edit their typed params (timer preset, counter PV + reset/load tag,
+ *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
  *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
  *     and rungs (with titles), and per rung add/remove/move/edit the top-level
  *     series elements (contact, compare, fb reference) and coils via forms — then
@@ -41,6 +44,7 @@ import {
   ContactMode,
   Element,
   FbRefEl,
+  FunctionBlockDef,
   Network,
   Program,
   Rung,
@@ -55,6 +59,17 @@ import {
   isFb,
   isNot,
 } from "./ir";
+import {
+  FB_TYPES,
+  FbField,
+  addFb,
+  fbFields,
+  isFbReferenced,
+  removeFb,
+  renameFb,
+  setFbParam,
+  setFbType,
+} from "./fbs";
 import {
   addCoil,
   addElement,
@@ -291,6 +306,46 @@ export class NotAPlcPanel extends LitElement {
     return Object.keys(this._program?.fbs ?? {});
   }
 
+  private _addFb(): void {
+    if (!this._program) return;
+    this._update(addFb(this._program).program);
+  }
+
+  private _removeFb(name: string): void {
+    if (!this._program) return;
+    if (isFbReferenced(this._program, name)) {
+      this._status = `Cannot delete '${name}': it is still used in a rung.`;
+      this.requestUpdate();
+      return;
+    }
+    this._update(removeFb(this._program, name));
+  }
+
+  private _renameFb(oldName: string, newName: string): void {
+    if (!this._program) return;
+    newName = newName.trim();
+    if (!newName || newName === oldName) return;
+    if (newName in (this._program.fbs ?? {}) || newName in this._program.tags) {
+      this._status = `The name '${newName}' is already taken.`;
+      this.requestUpdate();
+      return;
+    }
+    this._update(renameFb(this._program, oldName, newName));
+  }
+
+  private _setFbParam(name: string, field: FbField, raw: string): void {
+    let value: number | string | undefined;
+    if (raw === "") {
+      value = undefined;
+    } else if (field.kind === "int") {
+      const n = parseInt(raw, 10);
+      value = Number.isNaN(n) ? undefined : n;
+    } else {
+      value = raw;
+    }
+    this._edit((p) => setFbParam(p, name, field.key, value));
+  }
+
   private async _saveProgram(): Promise<void> {
     const conn = this.hass?.connection;
     if (!conn || !this._program) return;
@@ -351,6 +406,7 @@ export class NotAPlcPanel extends LitElement {
         <section class="preview">${this._renderPreview()}</section>
         <section class="edit">
           ${this._renderTags()}
+          ${this._renderFbs()}
           ${this._renderStructure()}
           <details>
             <summary>Advanced: edit as text (DSL)</summary>
@@ -507,6 +563,89 @@ export class NotAPlcPanel extends LitElement {
       `;
     }
     return html`<span class="muted">—</span>`;
+  }
+
+  // --- function-block instances -------------------------------------------
+
+  private _renderFbs(): TemplateResult {
+    if (!this._program) return html``;
+    const entries = Object.entries(this._program.fbs ?? {});
+    return html`
+      <div class="tags-header">
+        <h3>Function blocks</h3>
+        <button class="secondary" @click=${this._addFb}>+ Block</button>
+      </div>
+      ${entries.map(([name, def]) => this._renderFbRow(name, def))}
+      ${entries.length === 0
+        ? html`<div class="hint">
+            No function blocks. Add one to use timers, counters, latches or edge
+            detection in a rung.
+          </div>`
+        : ""}
+    `;
+  }
+
+  private _renderFbRow(name: string, def: FunctionBlockDef): TemplateResult {
+    return html`
+      <div class="fb-row">
+        <input
+          class="name-input"
+          .value=${name}
+          @change=${(e: Event) =>
+            this._renameFb(name, (e.target as HTMLInputElement).value)}
+        />
+        <select
+          .value=${def.type}
+          @change=${(e: Event) =>
+            this._edit((p) =>
+              setFbType(p, name, (e.target as HTMLSelectElement).value),
+            )}
+        >
+          ${FB_TYPES.map(
+            (t) => html`<option value=${t} ?selected=${t === def.type}>${t}</option>`,
+          )}
+        </select>
+        ${fbFields(def.type).map((field) => this._renderFbParam(name, def, field))}
+        <span class="spacer"></span>
+        <button
+          class="icon"
+          title="Delete block"
+          @click=${() => this._removeFb(name)}
+        >
+          ✕
+        </button>
+      </div>
+    `;
+  }
+
+  private _renderFbParam(
+    name: string,
+    def: FunctionBlockDef,
+    field: FbField,
+  ): TemplateResult {
+    const raw = def[field.key];
+    if (field.kind === "int") {
+      return html`
+        <label class="fb-param">
+          ${field.label}
+          <input
+            type="number"
+            min="1"
+            .value=${raw === undefined ? "" : String(raw)}
+            @change=${(e: Event) =>
+              this._setFbParam(name, field, (e.target as HTMLInputElement).value)}
+          />
+        </label>
+      `;
+    }
+    return html`
+      <label class="fb-param">
+        ${field.label}${field.optional ? "" : " *"}
+        ${this._tagSelect(typeof raw === "string" ? raw : "", this._tagNames(), (v) =>
+          this._edit((p) => setFbParam(p, name, field.key, v || undefined)),
+        )}
+      </label>
+    `;
   }
 
   // --- structure editor ---------------------------------------------------
@@ -1039,6 +1178,32 @@ export class NotAPlcPanel extends LitElement {
       color: var(--primary-text-color);
       padding: 3px 10px;
       font-size: 0.85em;
+    }
+    .fb-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      flex-wrap: wrap;
+    }
+    .fb-row select,
+    .fb-row input {
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 4px;
+      padding: 3px 5px;
+    }
+    .fb-param {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .fb-param input {
+      width: 80px;
     }
     details {
       margin-top: 12px;

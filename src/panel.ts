@@ -115,7 +115,7 @@ import {
   updateCoil,
   updateElementIn,
 } from "./elements";
-import { ToolTarget } from "./canvas";
+import { ToolTarget, nearestSlot, reorderDelta } from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { CanvasEdit, renderNetwork } from "./render";
 import {
@@ -179,8 +179,17 @@ export class NotAPlcPanel extends LitElement {
   @state() private _loaded = false;
   @state() private _tool?: Tool;
   @state() private _sel?: Selection;
+  /** In-progress top-level element drag (pointer-drag reorder, stage C). */
+  @state() private _drag?: { ni: number; ri: number; ei: number; drop: number };
 
   private _unsub?: () => void;
+  /** Per-rung insertion-slot x-positions reported by the renderer, `${ni}:${ri}`. */
+  private _geom = new Map<string, number[]>();
+  private _dragSvg: SVGSVGElement | null = null;
+  private _dragStartX = 0;
+  private _dragMoved = false;
+  private readonly _onDragMove = (ev: PointerEvent) => this._dragMove(ev);
+  private readonly _onDragUp = () => this._dragUp();
 
   protected updated(): void {
     if (this.hass && !this._loaded) {
@@ -193,6 +202,8 @@ export class NotAPlcPanel extends LitElement {
     super.disconnectedCallback();
     this._unsub?.();
     this._unsub = undefined;
+    window.removeEventListener("pointermove", this._onDragMove);
+    window.removeEventListener("pointerup", this._onDragUp);
   }
 
   private async _init(): Promise<void> {
@@ -1264,6 +1275,55 @@ export class NotAPlcPanel extends LitElement {
     this._sel = { kind: "coil", ni, ri, ci };
   }
 
+  // --- pointer-drag reorder of top-level elements (stage C) ------------------
+
+  private _elPointerDown(ni: number, ri: number, ei: number, ev: PointerEvent): void {
+    // Only a plain left-button press in select mode starts a drag.
+    if (this._tool || ev.button !== 0) return;
+    this._dragSvg = (ev.target as Element).closest("svg") as SVGSVGElement | null;
+    this._dragStartX = ev.clientX;
+    this._dragMoved = false;
+    this._drag = { ni, ri, ei, drop: ei };
+    window.addEventListener("pointermove", this._onDragMove);
+    window.addEventListener("pointerup", this._onDragUp);
+  }
+
+  private _toUserX(svg: SVGSVGElement, clientX: number): number {
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return clientX;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = 0;
+    return pt.matrixTransform(ctm.inverse()).x;
+  }
+
+  private _dragMove(ev: PointerEvent): void {
+    if (!this._drag || !this._dragSvg) return;
+    if (Math.abs(ev.clientX - this._dragStartX) > 4) this._dragMoved = true;
+    const slots = this._geom.get(`${this._drag.ni}:${this._drag.ri}`);
+    if (!slots) return;
+    const drop = nearestSlot(slots, this._toUserX(this._dragSvg, ev.clientX));
+    if (drop !== this._drag.drop) this._drag = { ...this._drag, drop };
+  }
+
+  private _dragUp(): void {
+    window.removeEventListener("pointermove", this._onDragMove);
+    window.removeEventListener("pointerup", this._onDragUp);
+    const d = this._drag;
+    this._drag = undefined;
+    this._dragSvg = null;
+    if (!d) return;
+    // Released without moving: treat as a plain click → select for the inspector.
+    if (!this._dragMoved) {
+      this._selectEl(d.ni, d.ri, [], d.ei);
+      return;
+    }
+    const delta = reorderDelta(d.ei, d.drop);
+    if (delta !== 0) {
+      this._edit((p) => moveElementIn(p, d.ni, d.ri, [], d.ei, delta));
+    }
+  }
+
   private _renderCanvas(): TemplateResult {
     if (!this._program) return html``;
     return html`
@@ -1296,7 +1356,7 @@ export class NotAPlcPanel extends LitElement {
       <div class="hint">
         ${this._tool
           ? `Click a ＋ slot to place “${this._tool.label}”.`
-          : "Click an element to edit it below."}
+          : "Click an element to edit it below, or drag it to reorder."}
       </div>
       ${this._program.networks.map((net, ni) => this._renderCanvasNetwork(net, ni))}
       ${this._renderInspector()}
@@ -1316,10 +1376,15 @@ export class NotAPlcPanel extends LitElement {
       ni,
       armed: this._tool?.target ?? null,
       selected,
+      drag:
+        this._drag?.ni === ni
+          ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
+          : null,
       onInsertElement: (ri, index) => this._placeElement(ni, ri, [], index),
-      onSelectElement: (ri, ei) => this._selectEl(ni, ri, [], ei),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
+      onGeometry: (ri, slotXs) => this._geom.set(`${ni}:${ri}`, slotXs),
+      onElementPointerDown: (ri, ei, ev) => this._elPointerDown(ni, ri, ei, ev),
     };
   }
 
@@ -1757,8 +1822,22 @@ export class NotAPlcPanel extends LitElement {
       pointer-events: all;
       cursor: pointer;
     }
+    .cv-svg .hit-el.drag-el {
+      cursor: grab;
+      touch-action: none;
+    }
     .cv-svg .hit-el:hover {
       fill: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    }
+    .cv-svg .hit-el.dragging {
+      fill: color-mix(in srgb, var(--primary-color) 20%, transparent);
+      cursor: grabbing;
+    }
+    .cv-svg .drop-indicator {
+      stroke: var(--primary-color);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      pointer-events: none;
     }
     .cv-svg .hit-el.sel {
       fill: color-mix(in srgb, var(--primary-color) 16%, transparent);

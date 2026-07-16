@@ -330,10 +330,18 @@ export interface CanvasEdit {
   selected?:
     | { kind: "el"; ni: number; ri: number; ei: number }
     | { kind: "coil"; ni: number; ri: number; ci: number };
+  /** The in-progress top-level element drag in this network, or null. */
+  drag?: { ri: number; ei: number; drop: number } | null;
   onInsertElement: (ri: number, index: number) => void;
-  onSelectElement: (ri: number, ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
+  /** Reports the x of each top-level insertion slot for a rung (drag geometry). */
+  onGeometry?: (ri: number, slotXs: number[]) => void;
+  /**
+   * A pointer went down on a top-level element hit-target. The panel decides
+   * whether it becomes a drag (moved) or a select (released in place).
+   */
+  onElementPointerDown?: (ri: number, ei: number, ev: PointerEvent) => void;
 }
 
 function renderRung(
@@ -469,6 +477,7 @@ function renderRung(
       edit.selected.ei === ei;
 
     let col = 0;
+    const slotXs: number[] = [];
     const slot = (c: number, index: number) => {
       if (edit.armed !== "element") return;
       painter.parts.push(
@@ -477,13 +486,17 @@ function renderRung(
       );
     };
     rung.series.forEach((el, ei) => {
+      slotXs.push(colX(col));
       slot(col, ei);
       const w = measureElement(el).cols;
       if (edit.armed === null) {
+        const dragging =
+          edit.drag != null && edit.drag.ri === ri && edit.drag.ei === ei;
         painter.parts.push(
-          svg`<rect class="hit-el ${selEl(ei) ? "sel" : ""}" x=${colX(col)} y=${baseY}
+          svg`<rect class="hit-el drag-el ${selEl(ei) ? "sel" : ""} ${dragging ? "dragging" : ""}"
+            x=${colX(col)} y=${baseY}
             width=${colX(col + w) - colX(col)} height=${height}
-            @click=${() => edit.onSelectElement(ri, ei)} />`,
+            @pointerdown=${(ev: PointerEvent) => edit.onElementPointerDown?.(ri, ei, ev)} />`,
         );
       } else if (selEl(ei)) {
         painter.parts.push(
@@ -493,7 +506,20 @@ function renderRung(
       }
       col += w;
     });
+    slotXs.push(colX(col));
     slot(col, rung.series.length);
+    edit.onGeometry?.(ri, slotXs);
+
+    // Drop indicator: a vertical marker at the target insertion slot while a
+    // top-level element in this rung is being dragged.
+    if (edit.drag != null && edit.drag.ri === ri) {
+      const dx = slotXs[edit.drag.drop];
+      if (dx !== undefined) {
+        painter.parts.push(
+          svg`<line class="drop-indicator" x1=${dx} y1=${baseY} x2=${dx} y2=${baseY + height} />`,
+        );
+      }
+    }
 
     rung.coils.forEach((_coil, i) => {
       const cy = baselineY + i * CELL_H;

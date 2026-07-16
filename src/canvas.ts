@@ -51,3 +51,35 @@ export function elementLabel(
 
 /** Kind of thing a palette tool places. */
 export type ToolTarget = "element" | "coil";
+
+// --- pointer-drag reordering (phase 4.4 stage C) ---------------------------
+//
+// A rung's top-level series has n elements and n+1 *insertion slots* (before the
+// first element, between each pair, and after the last). The renderer reports
+// the x of each slot; these pure helpers turn a pointer x into a slot index and
+// that slot into the positional delta `moveElementIn` expects.
+
+/** Index of the insertion slot whose x is nearest the pointer x. */
+export function nearestSlot(slotXs: number[], x: number): number {
+  let best = 0;
+  let bestDist = Infinity;
+  slotXs.forEach((sx, i) => {
+    const d = Math.abs(sx - x);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/**
+ * The positional delta to pass `moveElementIn` to move the element at `ei` so it
+ * lands at insertion slot `drop`. `moveItem` removes the element first, so a drop
+ * to the right of its own position shifts the target index down by one. Dropping
+ * onto its own two adjacent slots is a no-op (delta 0).
+ */
+export function reorderDelta(ei: number, drop: number): number {
+  const target = drop <= ei ? drop : drop - 1;
+  return target - ei;
+}

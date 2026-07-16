@@ -1280,7 +1280,9 @@ export class NotAPlcPanel extends LitElement {
   private _elPointerDown(ni: number, ri: number, ei: number, ev: PointerEvent): void {
     // Only a plain left-button press in select mode starts a drag.
     if (this._tool || ev.button !== 0) return;
-    this._dragSvg = (ev.target as Element).closest("svg") as SVGSVGElement | null;
+    // NB: `Element` here is the IR type, so reach the DOM node via `SVGElement`.
+    const target = ev.target as SVGElement | null;
+    this._dragSvg = target?.closest("svg") ?? null;
     this._dragStartX = ev.clientX;
     this._dragMoved = false;
     this._drag = { ni, ri, ei, drop: ei };

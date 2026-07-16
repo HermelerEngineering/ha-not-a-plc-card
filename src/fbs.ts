@@ -14,8 +14,10 @@ import {
   CompareEl,
   Element,
   FunctionBlockDef,
+  Output,
   Program,
   isBranch,
+  isCalc,
   isCompare,
   isFb,
   isMove,
@@ -146,11 +148,16 @@ export function isFbReferenced(program: Program, name: string): boolean {
     if (isBranch(el)) return el.branch.some((p) => p.some(inElement));
     return false; // NOT is an inline leaf — no instance reference
   };
+  const inOutput = (c: Output): boolean => {
+    if (isMove(c)) return operandInstance(c.src) === name;
+    if (isCalc(c)) {
+      return operandInstance(c.a) === name || operandInstance(c.b) === name;
+    }
+    return false;
+  };
   return program.networks.some((net) =>
     net.rungs.some(
-      (rung) =>
-        rung.series.some(inElement) ||
-        rung.coils.some((c) => isMove(c) && operandInstance(c.src) === name),
+      (rung) => rung.series.some(inElement) || rung.coils.some(inOutput),
     ),
   );
 }
@@ -210,9 +217,17 @@ export function renameFb(program: Program, oldName: string, newName: string): Pr
     rungs: net.rungs.map((rung) => ({
       ...rung,
       series: rung.series.map((el) => renameInElement(el, oldName, newName)),
-      coils: rung.coils.map((c) =>
-        isMove(c) ? { ...c, src: renameOperand(c.src, oldName, newName) } : c,
-      ),
+      coils: rung.coils.map((c) => {
+        if (isMove(c)) return { ...c, src: renameOperand(c.src, oldName, newName) };
+        if (isCalc(c)) {
+          return {
+            ...c,
+            a: renameOperand(c.a, oldName, newName),
+            b: renameOperand(c.b, oldName, newName),
+          };
+        }
+        return c;
+      }),
     })),
   }));
 

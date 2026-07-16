@@ -21,6 +21,7 @@ import {
   TagKind,
   TagType,
   isBranch,
+  isCalc,
   isCompare,
   isContact,
   isMove,
@@ -90,9 +91,11 @@ export function isTagReferenced(program: Program, name: string): boolean {
   for (const net of program.networks) {
     for (const rung of net.rungs) {
       if (rung.series.some(inElement)) return true;
-      const inOutput = rung.coils.some((c) =>
-        isMove(c) ? c.dst === name || c.src === name : c.tag === name,
-      );
+      const inOutput = rung.coils.some((c) => {
+        if (isMove(c)) return c.dst === name || c.src === name;
+        if (isCalc(c)) return c.dst === name || c.a === name || c.b === name;
+        return c.tag === name;
+      });
       if (inOutput) return true;
     }
   }
@@ -156,6 +159,13 @@ export function renameTag(program: Program, oldName: string, newName: string): P
           const next = { ...c };
           if (next.dst === oldName) next.dst = newName;
           if (next.src === oldName) next.src = newName;
+          return next;
+        }
+        if (isCalc(c)) {
+          const next = { ...c };
+          if (next.dst === oldName) next.dst = newName;
+          if (next.a === oldName) next.a = newName;
+          if (next.b === oldName) next.b = newName;
           return next;
         }
         return c.tag === oldName ? { ...c, tag: newName } : c;

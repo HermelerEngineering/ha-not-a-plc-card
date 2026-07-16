@@ -14,6 +14,8 @@
 
 import {
   BranchEl,
+  CalcEl,
+  CalcOp,
   Coil,
   CoilMode,
   CompareEl,
@@ -82,6 +84,10 @@ export function newCoil(tag = "", mode: CoilMode = "="): Coil {
 
 export function newMove(dst = "", src: number | string = 0): MoveEl {
   return { type: "move", dst, src };
+}
+
+export function newCalc(op: CalcOp = "ADD"): CalcEl {
+  return { type: "calc", op, dst: "", a: 0, b: 0 };
 }
 
 export function newRung(id: string): Rung {

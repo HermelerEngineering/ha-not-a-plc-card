@@ -14,6 +14,7 @@ import {
   moveElement,
   moveRung,
   newBranch,
+  newCalc,
   newCoil,
   newContact,
   newMove,
@@ -140,6 +141,19 @@ describe("element ops", () => {
       type: "move",
       dst: "level",
       src: "sp",
+    });
+  });
+
+  it("adds a calc output with a default op", () => {
+    expect(newCalc()).toEqual({ type: "calc", op: "ADD", dst: "", a: 0, b: 0 });
+    expect(newCalc("DIV").op).toBe("DIV");
+    const p = addCoil(prog(), 0, 0, newCalc("MUL"));
+    expect(p.networks[0].rungs[0].coils[1]).toEqual({
+      type: "calc",
+      op: "MUL",
+      dst: "",
+      a: 0,
+      b: 0,
     });
   });
 

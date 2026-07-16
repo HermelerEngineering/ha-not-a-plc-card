@@ -14,9 +14,10 @@
  *   - lets you manage *function-block instances* (phase 4.3): add/remove/rename
  *     them and edit their typed params (timer preset, counter PV + reset/load tag,
  *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
- *   - supports the MOVE output (`dst := src`) — the analog counterpart of a coil,
- *     copying a REAL value into a REAL tag when the rung conducts (palette `:=` tool
- *     + inspector; rendered as a `dst := src` box),
+ *   - supports the REAL outputs MOVE (`dst := src`) and CALC (`dst := a <op> b`,
+ *     `+ − × ÷`) — the analog counterparts of a coil, writing a REAL value into a
+ *     REAL tag when the rung conducts (palette `:=` / `+ − × ÷` tools + inspector;
+ *     rendered as a `dst := …` box),
  *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
  *     and rungs (with titles), and per rung add/remove/move/edit the series elements
  *     — contact, compare, fb reference, an inline NOT power inverter, and nested
@@ -50,6 +51,8 @@ import {
   ContactEl,
   ContactMode,
   Element,
+  CalcEl,
+  CalcOp,
   FbRefEl,
   FunctionBlockDef,
   MoveEl,
@@ -63,6 +66,7 @@ import {
   TagKind,
   TagType,
   isBranch,
+  isCalc,
   isCompare,
   isContact,
   isFb,
@@ -92,6 +96,7 @@ import {
   moveNetwork,
   moveRung,
   newBranch,
+  newCalc,
   newCoil,
   newCompare,
   newContact,
@@ -130,6 +135,13 @@ const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];
 const COIL_MODES: CoilMode[] = ["=", "S", "R"];
 const CONTACT_MODES: ContactMode[] = ["NO", "NC"];
 const COMPARE_OPS: CompareOp[] = ["GT", "GE", "LT", "LE", "EQ", "NE"];
+const CALC_OPS: CalcOp[] = ["ADD", "SUB", "MUL", "DIV"];
+const CALC_SYMBOL: Record<CalcOp, string> = {
+  ADD: "+",
+  SUB: "−",
+  MUL: "×",
+  DIV: "÷",
+};
 const WRITABLE_KINDS = new Set<TagKind>(["coil", "memory", "temp"]);
 
 // We build our own entity picker from `hass.states` because HA's
@@ -799,6 +811,12 @@ export class NotAPlcPanel extends LitElement {
               >
                 + Move
               </button>
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addCoil(p, ni, ri, newCalc()))}
+              >
+                + Calc
+              </button>
             </div>
           </div>
         </div>
@@ -1011,16 +1029,16 @@ export class NotAPlcPanel extends LitElement {
         ✕
       </button>`;
 
+    const realDst = this._tagNames(
+      (t) => WRITABLE_KINDS.has(t.kind) && t.type === "REAL",
+    );
+
     if (isMove(output)) {
       const set = (next: MoveEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
       return html`
         <div class="el-row">
           <span class="el-type">move</span>
-          ${this._tagSelect(
-            output.dst,
-            this._tagNames((t) => WRITABLE_KINDS.has(t.kind) && t.type === "REAL"),
-            (v) => set({ ...output, dst: v }),
-          )}
+          ${this._tagSelect(output.dst, realDst, (v) => set({ ...output, dst: v }))}
           <span class="muted">:=</span>
           <input
             class="right-input"
@@ -1028,6 +1046,44 @@ export class NotAPlcPanel extends LitElement {
             placeholder="value or REAL tag"
             @change=${(e: Event) =>
               set({ ...output, src: this._parseRight((e.target as HTMLInputElement).value) })}
+          />
+          ${del}
+        </div>
+      `;
+    }
+
+    if (isCalc(output)) {
+      const set = (next: CalcEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
+      return html`
+        <div class="el-row">
+          <span class="el-type">calc</span>
+          ${this._tagSelect(output.dst, realDst, (v) => set({ ...output, dst: v }))}
+          <span class="muted">:=</span>
+          <input
+            class="right-input"
+            .value=${String(output.a)}
+            placeholder="a"
+            @change=${(e: Event) =>
+              set({ ...output, a: this._parseRight((e.target as HTMLInputElement).value) })}
+          />
+          <select
+            .value=${output.op}
+            @change=${(e: Event) =>
+              set({ ...output, op: (e.target as HTMLSelectElement).value as CalcOp })}
+          >
+            ${CALC_OPS.map(
+              (o) =>
+                html`<option value=${o} ?selected=${o === output.op}>
+                  ${CALC_SYMBOL[o]}
+                </option>`,
+            )}
+          </select>
+          <input
+            class="right-input"
+            .value=${String(output.b)}
+            placeholder="b"
+            @change=${(e: Event) =>
+              set({ ...output, b: this._parseRight((e.target as HTMLInputElement).value) })}
           />
           ${del}
         </div>
@@ -1069,6 +1125,11 @@ export class NotAPlcPanel extends LitElement {
       { label: "NOT", target: "element", make: () => newNot() },
       { label: "( )", target: "coil", make: () => newCoil() },
       { label: ":=", target: "coil", make: () => newMove() },
+      ...CALC_OPS.map((op) => ({
+        label: CALC_SYMBOL[op],
+        target: "coil" as ToolTarget,
+        make: () => newCalc(op),
+      })),
     ];
     const fb = this._fbNames()[0];
     if (fb) {

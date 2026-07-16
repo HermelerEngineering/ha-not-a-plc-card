@@ -27,6 +27,7 @@ import {
   NotEl,
   Rung,
   StateImage,
+  isCalc,
   isCompare,
   isContact,
   isFb,
@@ -34,6 +35,13 @@ import {
   isNot,
 } from "./ir";
 import { PowerFlow } from "./power-flow";
+
+const CALC_SYMBOL: Record<string, string> = {
+  ADD: "+",
+  SUB: "−",
+  MUL: "×",
+  DIV: "÷",
+};
 
 const OP_SYMBOL: Record<CompareOp, string> = {
   GT: ">",
@@ -397,6 +405,32 @@ function renderRung(
       }
       painter.parts.push(
         svg`<text x=${cx} y=${cy + 4} class="compare-text">:= ${srcLabel}</text>`,
+      );
+      return;
+    }
+
+    if (isCalc(output)) {
+      // dst := a <op> b box, coloured by the rung result.
+      const cls = energised ? "symbol live" : "symbol";
+      const boxW = 92;
+      const boxH = 26;
+      painter.parts.push(
+        svg`<line x1=${coilX} y1=${cy} x2=${cx - boxW / 2} y2=${cy} class=${wireClass(energised)} />`,
+      );
+      painter.parts.push(
+        svg`<rect x=${cx - boxW / 2} y=${cy - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+      );
+      const dstVal = fmtNumber(state[output.dst]);
+      const dstLabel = dstVal !== null ? `${output.dst} = ${dstVal}` : output.dst;
+      painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${dstLabel}</text>`);
+      const operand = (o: number | string): string => {
+        if (typeof o !== "string") return String(o);
+        const v = fmtNumber(state[o]);
+        return v !== null ? `${o}=${v}` : o;
+      };
+      const expr = `${operand(output.a)} ${CALC_SYMBOL[output.op] ?? "?"} ${operand(output.b)}`;
+      painter.parts.push(
+        svg`<text x=${cx} y=${cy + 4} class="compare-text">:= ${expr}</text>`,
       );
       return;
     }

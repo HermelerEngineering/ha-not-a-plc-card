@@ -25,6 +25,7 @@ import {
   Rung,
   StateImage,
   isBranch,
+  isCalc,
   isCompare,
   isContact,
   isFb,
@@ -173,8 +174,9 @@ export function computePowerFlow(program: Program, state: StateImage): PowerFlow
       const result = flowSeries(rung.series, state, true, elements);
       rungs.set(rung, { result });
       for (const output of rung.coils) {
-        // A move has no stored bool; it is energised with the rung result.
-        const value = isMove(output) ? false : truthy(state[output.tag]);
+        // A move/calc has no stored bool; it is energised with the rung result.
+        const value =
+          isMove(output) || isCalc(output) ? false : truthy(state[output.tag]);
         coils.set(output, { energised: result, value });
       }
     }

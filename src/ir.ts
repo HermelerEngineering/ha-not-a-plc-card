@@ -72,8 +72,20 @@ export interface MoveEl {
   src: number | string;
 }
 
-/** A rung output: a boolean coil or a REAL move. */
-export type Output = Coil | MoveEl;
+export type CalcOp = "ADD" | "SUB" | "MUL" | "DIV";
+
+export interface CalcEl {
+  type: "calc";
+  op: CalcOp;
+  /** Writable REAL destination tag. */
+  dst: string;
+  /** Operands: each a numeric constant, a REAL tag, or a fb output. */
+  a: number | string;
+  b: number | string;
+}
+
+/** A rung output: a boolean coil, a REAL move, or a REAL calc. */
+export type Output = Coil | MoveEl | CalcEl;
 
 export interface Rung {
   id: string;
@@ -134,4 +146,8 @@ export function isFb(el: Element): el is FbRefEl {
 
 export function isMove(output: Output): output is MoveEl {
   return (output as MoveEl).type === "move";
+}
+
+export function isCalc(output: Output): output is CalcEl {
+  return (output as CalcEl).type === "calc";
 }

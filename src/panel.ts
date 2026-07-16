@@ -41,8 +41,9 @@ import {
   html,
   svg,
 } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
+import { defineOnce } from "./define";
 import { HomeAssistant } from "./ha";
 import {
   BranchEl,
@@ -164,7 +165,7 @@ type Selection =
   | { kind: "el"; ni: number; ri: number; steps: SeriesStep[]; ei: number }
   | { kind: "coil"; ni: number; ri: number; ci: number };
 
-@customElement("not-a-plc-panel")
+@defineOnce("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
   @property({ type: Boolean }) narrow = false;

@@ -7,12 +7,13 @@
  */
 
 import { LitElement, TemplateResult, css, html } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
+import { defineOnce } from "./define";
 import { HomeAssistant, LovelaceCardConfig } from "./ha";
 import { ServiceInfo } from "./ir";
 
-@customElement("not-a-plc-card-editor")
+@defineOnce("not-a-plc-card-editor")
 export class NotAPlcCardEditor extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
 

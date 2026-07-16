@@ -27,8 +27,14 @@ jobs:
 
       # HACS downloads the file named in hacs.json ("not-a-plc-card.js") from the
       # release assets, so attach the built bundle to the release for this tag.
+      # Uses the first-party `gh` CLI (preinstalled on the runner) rather than a
+      # third-party action, so it is immune to the Actions Node-runtime churn that
+      # broke the floating softprops/action-gh-release@v2.
       - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/not-a-plc-card.js
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          dist/not-a-plc-card.js
+          --title "$GITHUB_REF_NAME"
+          --generate-notes

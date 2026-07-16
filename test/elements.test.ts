@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Program } from "../src/ir";
-import { BranchEl, ContactEl } from "../src/ir";
+import { BranchEl, Coil, ContactEl } from "../src/ir";
 import {
   addCoil,
   addElement,
@@ -124,7 +124,7 @@ describe("element ops", () => {
 
     const p2 = insertCoil(prog(), 0, 0, 0, newCoil("out", "S"));
     expect(p2.networks[0].rungs[0].coils).toHaveLength(2);
-    expect(p2.networks[0].rungs[0].coils[0].mode).toBe("S");
+    expect((p2.networks[0].rungs[0].coils[0] as Coil).mode).toBe("S");
   });
 
   it("adds and updates a move output alongside coils", () => {
@@ -147,7 +147,7 @@ describe("element ops", () => {
     let p = addCoil(prog(), 0, 0, newCoil("out", "S"));
     expect(p.networks[0].rungs[0].coils).toHaveLength(2);
     p = updateCoil(p, 0, 0, 1, newCoil("out", "R"));
-    expect(p.networks[0].rungs[0].coils[1].mode).toBe("R");
+    expect((p.networks[0].rungs[0].coils[1] as Coil).mode).toBe("R");
     p = removeCoil(p, 0, 0, 0);
     expect(p.networks[0].rungs[0].coils).toHaveLength(1);
   });

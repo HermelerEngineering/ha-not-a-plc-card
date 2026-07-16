@@ -118,7 +118,7 @@ describe("renameTag", () => {
     ).branch[1][0];
     expect(cmp.left).toBe("temp_c");
     expect(cmp.right).toBe("temp_c");
-    expect(p.networks[0].rungs[0].coils[0].tag).toBe("lamp");
+    expect((p.networks[0].rungs[0].coils[0] as { tag: string }).tag).toBe("lamp");
   });
 
   it("is a no-op on a name collision or empty name", () => {

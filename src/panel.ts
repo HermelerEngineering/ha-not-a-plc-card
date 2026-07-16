@@ -140,7 +140,7 @@ const WRITABLE_KINDS = new Set<TagKind>(["coil", "memory", "temp"]);
 interface Tool {
   label: string;
   target: ToolTarget;
-  make: () => Element | Coil;
+  make: () => Element | Output;
 }
 
 /** What the canvas has selected for the inspector. */
@@ -1111,8 +1111,8 @@ export class NotAPlcPanel extends LitElement {
   private _placeCoil(ni: number, ri: number, index: number): void {
     const tool = this._tool;
     if (!this._program || tool?.target !== "coil") return;
-    const coil = tool.make() as Coil;
-    this._update(insertCoil(this._program, ni, ri, index, coil));
+    const output = tool.make() as Output;
+    this._update(insertCoil(this._program, ni, ri, index, output));
   }
 
   private _selectEl(ni: number, ri: number, steps: SeriesStep[], ei: number): void {

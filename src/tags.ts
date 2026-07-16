@@ -23,6 +23,7 @@ import {
   isBranch,
   isCompare,
   isContact,
+  isMove,
 } from "./ir";
 
 /** Entity domains offered per tag type. See project-plan §3a. */
@@ -89,7 +90,10 @@ export function isTagReferenced(program: Program, name: string): boolean {
   for (const net of program.networks) {
     for (const rung of net.rungs) {
       if (rung.series.some(inElement)) return true;
-      if (rung.coils.some((c) => c.tag === name)) return true;
+      const inOutput = rung.coils.some((c) =>
+        isMove(c) ? c.dst === name || c.src === name : c.tag === name,
+      );
+      if (inOutput) return true;
     }
   }
   for (const fb of Object.values(program.fbs ?? {})) {
@@ -147,9 +151,15 @@ export function renameTag(program: Program, oldName: string, newName: string): P
     rungs: net.rungs.map((rung) => ({
       ...rung,
       series: rung.series.map((el) => renameInElement(el, oldName, newName)),
-      coils: rung.coils.map((c) =>
-        c.tag === oldName ? { ...c, tag: newName } : c,
-      ),
+      coils: rung.coils.map((c) => {
+        if (isMove(c)) {
+          const next = { ...c };
+          if (next.dst === oldName) next.dst = newName;
+          if (next.src === oldName) next.src = newName;
+          return next;
+        }
+        return c.tag === oldName ? { ...c, tag: newName } : c;
+      }),
     })),
   }));
 

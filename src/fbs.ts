@@ -18,6 +18,7 @@ import {
   isBranch,
   isCompare,
   isFb,
+  isMove,
 } from "./ir";
 
 export const EDGE_TYPES = ["R_TRIG", "F_TRIG"];
@@ -146,7 +147,11 @@ export function isFbReferenced(program: Program, name: string): boolean {
     return false; // NOT is an inline leaf — no instance reference
   };
   return program.networks.some((net) =>
-    net.rungs.some((rung) => rung.series.some(inElement)),
+    net.rungs.some(
+      (rung) =>
+        rung.series.some(inElement) ||
+        rung.coils.some((c) => isMove(c) && operandInstance(c.src) === name),
+    ),
   );
 }
 
@@ -205,6 +210,9 @@ export function renameFb(program: Program, oldName: string, newName: string): Pr
     rungs: net.rungs.map((rung) => ({
       ...rung,
       series: rung.series.map((el) => renameInElement(el, oldName, newName)),
+      coils: rung.coils.map((c) =>
+        isMove(c) ? { ...c, src: renameOperand(c.src, oldName, newName) } : c,
+      ),
     })),
   }));
 

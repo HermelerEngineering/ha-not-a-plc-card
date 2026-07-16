@@ -9,8 +9,10 @@
  *   - lets you manage the tag table (phase 4.2): add/remove tags, rename them
  *     (rewriting every reference across the IR), change kind/type, bind an input
  *     to an entity via a self-contained `<input>` + `<datalist>` picker (with type
- *     inference from the entity domain), set a coil's optional `writes` target and
- *     a memory tag's `retain` flag — then save (`save_program`),
+ *     inference from the entity domain), set a coil's optional `writes` target — a
+ *     BOOL coil actuates turn_on/off, a REAL coil writes its value via a service +
+ *     value_key (prefilled per target domain) — and a memory tag's `retain` flag,
+ *     then save (`save_program`),
  *   - lets you manage *function-block instances* (phase 4.3): add/remove/rename
  *     them and edit their typed params (timer preset, counter PV + reset/load tag,
  *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
@@ -118,7 +120,9 @@ import { CanvasEdit, renderNetwork } from "./render";
 import {
   BOOL_DOMAINS,
   REAL_DOMAINS,
+  WRITE_DOMAINS,
   addTag,
+  defaultRealWrite,
   domainsForType,
   inferType,
   isTagReferenced,
@@ -563,6 +567,7 @@ export class NotAPlcPanel extends LitElement {
     return html`
       <datalist id="np-real-entities">${options(REAL_DOMAINS)}</datalist>
       <datalist id="np-bool-entities">${options(BOOL_DOMAINS)}</datalist>
+      <datalist id="np-write-entities">${options(WRITE_DOMAINS)}</datalist>
     `;
   }
 
@@ -572,7 +577,12 @@ export class NotAPlcPanel extends LitElement {
     placeholder: string,
     onChange: (v: string) => void,
   ): TemplateResult {
-    const listId = domains === REAL_DOMAINS ? "np-real-entities" : "np-bool-entities";
+    const listId =
+      domains === REAL_DOMAINS
+        ? "np-real-entities"
+        : domains === WRITE_DOMAINS
+          ? "np-write-entities"
+          : "np-bool-entities";
     return html`
       <input
         class="entity-input"
@@ -594,6 +604,7 @@ export class NotAPlcPanel extends LitElement {
       );
     }
     if (tag.kind === "coil") {
+      if ((tag.type ?? "BOOL") === "REAL") return this._renderRealWrite(name, tag);
       return this._entityPicker(
         tag.writes?.target ?? "",
         BOOL_DOMAINS,
@@ -615,6 +626,72 @@ export class NotAPlcPanel extends LitElement {
       `;
     }
     return html`<span class="muted">—</span>`;
+  }
+
+  /** REAL coil: pick a target entity + the service/key that writes its value. */
+  private _renderRealWrite(name: string, tag: TagDef): TemplateResult {
+    const w = tag.writes;
+    return html`
+      <div class="real-write">
+        ${this._entityPicker(
+          w?.target ?? "",
+          WRITE_DOMAINS,
+          "writes to… (optional)",
+          (v) => this._setRealWriteTarget(name, v),
+        )}
+        ${w
+          ? html`
+              <input
+                class="entity-input"
+                .value=${w.service ?? ""}
+                placeholder="service (domain.service)"
+                @change=${(e: Event) =>
+                  this._setRealWriteField(name, "service", (e.target as HTMLInputElement).value)}
+              />
+              <input
+                class="entity-input"
+                .value=${w.value_key ?? ""}
+                placeholder="value key"
+                @change=${(e: Event) =>
+                  this._setRealWriteField(name, "value_key", (e.target as HTMLInputElement).value)}
+              />
+            `
+          : ""}
+      </div>
+    `;
+  }
+
+  private _setRealWriteTarget(name: string, target: string): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    if (!target) {
+      this._update(setTag(this._program, name, { ...tag, writes: undefined }));
+      return;
+    }
+    // Prefill the service/key from the target's domain unless already set.
+    const preset = defaultRealWrite(target);
+    const writes = {
+      target,
+      service: tag.writes?.service || preset.service || undefined,
+      value_key: tag.writes?.value_key || preset.value_key || undefined,
+    };
+    this._update(setTag(this._program, name, { ...tag, writes }));
+  }
+
+  private _setRealWriteField(
+    name: string,
+    field: "service" | "value_key",
+    value: string,
+  ): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    if (!tag.writes) return;
+    this._update(
+      setTag(this._program, name, {
+        ...tag,
+        writes: { ...tag.writes, [field]: value || undefined },
+      }),
+    );
   }
 
   // --- function-block instances -------------------------------------------
@@ -1443,6 +1520,11 @@ export class NotAPlcPanel extends LitElement {
     label.retain input {
       width: auto;
       min-width: 0;
+    }
+    .real-write {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
     button.secondary {
       background: var(--secondary-background-color, #e0e0e0);

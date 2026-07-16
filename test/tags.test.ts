@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Program } from "../src/ir";
 import {
   addTag,
+  defaultRealWrite,
   domainsForType,
   freshTagName,
   inferType,
@@ -21,6 +22,25 @@ describe("inferType", () => {
     expect(inferType("input_boolean.flag")).toBe("BOOL");
     expect(inferType("switch.pump")).toBe("BOOL");
     expect(inferType("light.hall")).toBe("BOOL");
+  });
+});
+
+describe("defaultRealWrite", () => {
+  it("suggests a service + value key per target domain", () => {
+    expect(defaultRealWrite("light.hall")).toEqual({
+      service: "light.turn_on",
+      value_key: "brightness_pct",
+    });
+    expect(defaultRealWrite("input_number.sp")).toEqual({
+      service: "input_number.set_value",
+      value_key: "value",
+    });
+    expect(defaultRealWrite("fan.desk")).toEqual({
+      service: "fan.set_percentage",
+      value_key: "percentage",
+    });
+    // Unknown domain → blank (the user fills it in).
+    expect(defaultRealWrite("sensor.x")).toEqual({ service: "", value_key: "" });
   });
 });
 

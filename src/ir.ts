@@ -14,6 +14,10 @@ export type CompareOp = "GT" | "GE" | "LT" | "LE" | "EQ" | "NE";
 
 export interface WritesBinding {
   target: string;
+  /** For a REAL coil: the `domain.service` that sets the value (e.g. light.turn_on). */
+  service?: string;
+  /** For a REAL coil: the service-data key carrying the value (e.g. brightness_pct). */
+  value_key?: string;
 }
 
 export interface TagDef {

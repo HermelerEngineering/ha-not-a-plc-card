@@ -48,6 +48,46 @@ export function domainsForType(type: TagType): string[] {
   return type === "REAL" ? REAL_DOMAINS : BOOL_DOMAINS;
 }
 
+/** Entity domains a REAL coil can write a value to (see project-plan §9). */
+export const WRITE_DOMAINS = [
+  "light",
+  "input_number",
+  "number",
+  "fan",
+  "cover",
+  "valve",
+  "media_player",
+  "climate",
+];
+
+/** A sensible default service + value_key for writing a REAL to an entity. */
+export function defaultRealWrite(entityId: string): {
+  service: string;
+  value_key: string;
+} {
+  const domain = entityId.split(".")[0];
+  switch (domain) {
+    case "input_number":
+      return { service: "input_number.set_value", value_key: "value" };
+    case "number":
+      return { service: "number.set_value", value_key: "value" };
+    case "light":
+      return { service: "light.turn_on", value_key: "brightness_pct" };
+    case "fan":
+      return { service: "fan.set_percentage", value_key: "percentage" };
+    case "cover":
+      return { service: "cover.set_cover_position", value_key: "position" };
+    case "valve":
+      return { service: "valve.set_valve_position", value_key: "position" };
+    case "media_player":
+      return { service: "media_player.volume_set", value_key: "volume_level" };
+    case "climate":
+      return { service: "climate.set_temperature", value_key: "temperature" };
+    default:
+      return { service: "", value_key: "" };
+  }
+}
+
 /**
  * Infer a tag type from a bound entity_id's domain: numeric domains map to
  * REAL, everything else to BOOL. The result is a sensible default the user can

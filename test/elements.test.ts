@@ -16,6 +16,7 @@ import {
   newBranch,
   newCoil,
   newContact,
+  newMove,
   newNot,
   removeCoil,
   removeElement,
@@ -124,6 +125,22 @@ describe("element ops", () => {
     const p2 = insertCoil(prog(), 0, 0, 0, newCoil("out", "S"));
     expect(p2.networks[0].rungs[0].coils).toHaveLength(2);
     expect(p2.networks[0].rungs[0].coils[0].mode).toBe("S");
+  });
+
+  it("adds and updates a move output alongside coils", () => {
+    expect(newMove()).toEqual({ type: "move", dst: "", src: 0 });
+    let p = addCoil(prog(), 0, 0, newMove("level", 42));
+    expect(p.networks[0].rungs[0].coils[1]).toEqual({
+      type: "move",
+      dst: "level",
+      src: 42,
+    });
+    p = updateCoil(p, 0, 0, 1, newMove("level", "sp"));
+    expect(p.networks[0].rungs[0].coils[1]).toEqual({
+      type: "move",
+      dst: "level",
+      src: "sp",
+    });
   });
 
   it("adds, updates and removes coils", () => {

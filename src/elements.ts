@@ -22,8 +22,10 @@ import {
   ContactMode,
   Element,
   FbRefEl,
+  MoveEl,
   Network,
   NotEl,
+  Output,
   Program,
   Rung,
   isBranch,
@@ -76,6 +78,10 @@ export function newFbRef(instance = ""): FbRefEl {
 
 export function newCoil(tag = "", mode: CoilMode = "="): Coil {
   return { type: "coil", tag, mode };
+}
+
+export function newMove(dst = "", src: number | string = 0): MoveEl {
+  return { type: "move", dst, src };
 }
 
 export function newRung(id: string): Rung {
@@ -327,22 +333,22 @@ export function addCoil(
   program: Program,
   ni: number,
   ri: number,
-  coil: Coil,
+  output: Output,
 ): Program {
-  return updateRungAt(program, ni, ri, (r) => ({ ...r, coils: [...r.coils, coil] }));
+  return updateRungAt(program, ni, ri, (r) => ({ ...r, coils: [...r.coils, output] }));
 }
 
-/** Insert a coil at position `index` in the rung's coil list. */
+/** Insert an output at position `index` in the rung's output list. */
 export function insertCoil(
   program: Program,
   ni: number,
   ri: number,
   index: number,
-  coil: Coil,
+  output: Output,
 ): Program {
   return updateRungAt(program, ni, ri, (r) => ({
     ...r,
-    coils: [...r.coils.slice(0, index), coil, ...r.coils.slice(index)],
+    coils: [...r.coils.slice(0, index), output, ...r.coils.slice(index)],
   }));
 }
 
@@ -360,10 +366,10 @@ export function updateCoil(
   ni: number,
   ri: number,
   ci: number,
-  coil: Coil,
+  output: Output,
 ): Program {
   return updateRungAt(program, ni, ri, (r) => ({
     ...r,
-    coils: mapAt(r.coils, ci, () => coil),
+    coils: mapAt(r.coils, ci, () => output),
   }));
 }

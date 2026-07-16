@@ -14,6 +14,9 @@
  *   - lets you manage *function-block instances* (phase 4.3): add/remove/rename
  *     them and edit their typed params (timer preset, counter PV + reset/load tag,
  *     latch reset tag), so timers/counters/latches/edges are usable without the DSL,
+ *   - supports the MOVE output (`dst := src`) — the analog counterpart of a coil,
+ *     copying a REAL value into a REAL tag when the rung conducts (palette `:=` tool
+ *     + inspector; rendered as a `dst := src` box),
  *   - lets you edit the program *structure* (phase 4.3): add/remove/move networks
  *     and rungs (with titles), and per rung add/remove/move/edit the series elements
  *     — contact, compare, fb reference, an inline NOT power inverter, and nested
@@ -49,7 +52,9 @@ import {
   Element,
   FbRefEl,
   FunctionBlockDef,
+  MoveEl,
   Network,
+  Output,
   Program,
   Rung,
   ServiceInfo,
@@ -61,6 +66,7 @@ import {
   isCompare,
   isContact,
   isFb,
+  isMove,
   isNot,
 } from "./ir";
 import {
@@ -90,6 +96,7 @@ import {
   newCompare,
   newContact,
   newFbRef,
+  newMove,
   newNot,
   removeCoil,
   removeElementIn,
@@ -777,7 +784,7 @@ export class NotAPlcPanel extends LitElement {
             ${this._renderSeries(rung.series, ni, ri, [])}
           </div>
           <div class="col">
-            <div class="col-label">Coils</div>
+            <div class="col-label">Outputs</div>
             ${rung.coils.map((c, ci) => this._renderCoilEditor(c, ni, ri, ci))}
             <div class="add-row">
               <button
@@ -785,6 +792,12 @@ export class NotAPlcPanel extends LitElement {
                 @click=${() => this._edit((p) => addCoil(p, ni, ri, newCoil()))}
               >
                 + Coil
+              </button>
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addCoil(p, ni, ri, newMove()))}
+              >
+                + Move
               </button>
             </div>
           </div>
@@ -984,17 +997,50 @@ export class NotAPlcPanel extends LitElement {
   }
 
   private _renderCoilEditor(
-    coil: Coil,
+    output: Output,
     ni: number,
     ri: number,
     ci: number,
   ): TemplateResult {
+    const del = html`<span class="spacer"></span>
+      <button
+        class="icon"
+        title="Delete output"
+        @click=${() => this._edit((p) => removeCoil(p, ni, ri, ci))}
+      >
+        ✕
+      </button>`;
+
+    if (isMove(output)) {
+      const set = (next: MoveEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
+      return html`
+        <div class="el-row">
+          <span class="el-type">move</span>
+          ${this._tagSelect(
+            output.dst,
+            this._tagNames((t) => WRITABLE_KINDS.has(t.kind) && t.type === "REAL"),
+            (v) => set({ ...output, dst: v }),
+          )}
+          <span class="muted">:=</span>
+          <input
+            class="right-input"
+            .value=${String(output.src)}
+            placeholder="value or REAL tag"
+            @change=${(e: Event) =>
+              set({ ...output, src: this._parseRight((e.target as HTMLInputElement).value) })}
+          />
+          ${del}
+        </div>
+      `;
+    }
+
+    const coil = output;
     const set = (next: Coil) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
     return html`
       <div class="el-row">
         ${this._tagSelect(
           coil.tag,
-          this._tagNames((t) => WRITABLE_KINDS.has(t.kind)),
+          this._tagNames((t) => WRITABLE_KINDS.has(t.kind) && (t.type ?? "BOOL") === "BOOL"),
           (v) => set({ ...coil, tag: v }),
         )}
         <select
@@ -1007,14 +1053,7 @@ export class NotAPlcPanel extends LitElement {
               html`<option value=${m} ?selected=${m === (coil.mode ?? "=")}>${m}</option>`,
           )}
         </select>
-        <span class="spacer"></span>
-        <button
-          class="icon"
-          title="Delete coil"
-          @click=${() => this._edit((p) => removeCoil(p, ni, ri, ci))}
-        >
-          ✕
-        </button>
+        ${del}
       </div>
     `;
   }
@@ -1029,6 +1068,7 @@ export class NotAPlcPanel extends LitElement {
       { label: "OR", target: "element", make: () => newBranch() },
       { label: "NOT", target: "element", make: () => newNot() },
       { label: "( )", target: "coil", make: () => newCoil() },
+      { label: ":=", target: "coil", make: () => newMove() },
     ];
     const fb = this._fbNames()[0];
     if (fb) {

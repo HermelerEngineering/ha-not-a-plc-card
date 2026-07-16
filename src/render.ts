@@ -30,6 +30,7 @@ import {
   isCompare,
   isContact,
   isFb,
+  isMove,
   isNot,
 } from "./ir";
 import { PowerFlow } from "./power-flow";
@@ -367,14 +368,40 @@ function renderRung(
       svg`<line x1=${coilX} y1=${baselineY} x2=${coilX} y2=${busBottom} class=${wireClass(res.poweredOut)} />`,
     );
   }
-  rung.coils.forEach((coil, i) => {
-    const cf = flow.coils.get(coil);
+  rung.coils.forEach((output, i) => {
+    const cf = flow.coils.get(output);
     const energised = cf?.energised ?? false;
-    const value = cf?.value ?? false;
     const cy = baselineY + i * CELL_H;
-    // Sit the coil about half a cell right of the bus, so the stub matches the
+    // Sit the output about half a cell right of the bus, so the stub matches the
     // spacing used between a branch bus and its parallel contacts.
     const cx = coilX + CELL_W / 2;
+
+    if (isMove(output)) {
+      // A move is drawn as a box "dst := src" coloured by the rung result.
+      const cls = energised ? "symbol live" : "symbol";
+      const boxW = 74;
+      const boxH = 26;
+      painter.parts.push(
+        svg`<line x1=${coilX} y1=${cy} x2=${cx - boxW / 2} y2=${cy} class=${wireClass(energised)} />`,
+      );
+      painter.parts.push(
+        svg`<rect x=${cx - boxW / 2} y=${cy - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+      );
+      const dstVal = fmtNumber(state[output.dst]);
+      const dstLabel = dstVal !== null ? `${output.dst} = ${dstVal}` : output.dst;
+      painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${dstLabel}</text>`);
+      let srcLabel = String(output.src);
+      if (typeof output.src === "string") {
+        const sv = fmtNumber(state[output.src]);
+        if (sv !== null) srcLabel = `${output.src}=${sv}`;
+      }
+      painter.parts.push(
+        svg`<text x=${cx} y=${cy + 4} class="compare-text">:= ${srcLabel}</text>`,
+      );
+      return;
+    }
+
+    const value = cf?.value ?? false;
     const cls = energised ? "coil live" : "coil";
     // Wire into the coil, then the coil drawn as a parenthesis pair "( )" as in
     // common PLC packages. S/R modes show the letter between the parentheses.
@@ -387,8 +414,8 @@ function renderRung(
     painter.parts.push(
       svg`<path d="M ${cx + 6} ${cy - 13} Q ${cx + 15} ${cy} ${cx + 6} ${cy + 13}" class=${cls} fill="none" />`,
     );
-    painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${coil.tag}</text>`);
-    const mode = coil.mode ?? "=";
+    painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${output.tag}</text>`);
+    const mode = output.mode ?? "=";
     if (mode !== "=") {
       painter.parts.push(
         svg`<text x=${cx} y=${cy + 5} class=${value ? "coil-mode live" : "coil-mode"}>${mode}</text>`,

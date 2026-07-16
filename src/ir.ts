@@ -64,10 +64,21 @@ export interface Coil {
   mode?: CoilMode;
 }
 
+export interface MoveEl {
+  type: "move";
+  /** Writable REAL destination tag. */
+  dst: string;
+  /** Numeric constant, a REAL tag, or a function-block output (`inst.ET`/`.CV`). */
+  src: number | string;
+}
+
+/** A rung output: a boolean coil or a REAL move. */
+export type Output = Coil | MoveEl;
+
 export interface Rung {
   id: string;
   series: Element[];
-  coils: Coil[];
+  coils: Output[];
   title?: string;
 }
 
@@ -119,4 +130,8 @@ export function isCompare(el: Element): el is CompareEl {
 
 export function isFb(el: Element): el is FbRefEl {
   return (el as FbRefEl).type === "fb";
+}
+
+export function isMove(output: Output): output is MoveEl {
+  return (output as MoveEl).type === "move";
 }

@@ -17,10 +17,10 @@
  */
 
 import {
-  Coil,
   CompareEl,
   CompareOp,
   Element,
+  Output,
   Program,
   Rung,
   StateImage,
@@ -28,6 +28,7 @@ import {
   isCompare,
   isContact,
   isFb,
+  isMove,
   isNot,
 } from "./ir";
 
@@ -73,7 +74,7 @@ export interface RungFlow {
 
 export interface PowerFlow {
   elements: Map<Element, ElementFlow>;
-  coils: Map<Coil, CoilFlow>;
+  coils: Map<Output, CoilFlow>;
   rungs: Map<Rung, RungFlow>;
 }
 
@@ -164,15 +165,17 @@ function flowSeries(
  */
 export function computePowerFlow(program: Program, state: StateImage): PowerFlow {
   const elements = new Map<Element, ElementFlow>();
-  const coils = new Map<Coil, CoilFlow>();
+  const coils = new Map<Output, CoilFlow>();
   const rungs = new Map<Rung, RungFlow>();
 
   for (const network of program.networks) {
     for (const rung of network.rungs) {
       const result = flowSeries(rung.series, state, true, elements);
       rungs.set(rung, { result });
-      for (const coil of rung.coils) {
-        coils.set(coil, { energised: result, value: truthy(state[coil.tag]) });
+      for (const output of rung.coils) {
+        // A move has no stored bool; it is energised with the rung result.
+        const value = isMove(output) ? false : truthy(state[output.tag]);
+        coils.set(output, { energised: result, value });
       }
     }
   }

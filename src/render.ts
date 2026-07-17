@@ -583,8 +583,13 @@ function renderRung(
         .sort((a, b) => a.steps.length - b.steps.length);
       for (const info of nested) {
         const top = baseY + info.row * CELL_H;
+        const last = info.slotCols.length - 1;
         info.slotCols.forEach((c, index) => {
-          const dx = rank(c, top, top + CELL_H, info.steps.length) * SLOT_SPREAD;
+          // Step toward the inside of the branch: the entry slot (first) steps
+          // right, the exit/join slot (last) steps left, so both sit inside the
+          // branch rather than past the join line.
+          const dir = index === last && index !== 0 ? -1 : 1;
+          const dx = rank(c, top, top + CELL_H, info.steps.length) * SLOT_SPREAD * dir;
           painter.parts.push(
             svg`<rect class="hit-slot" x=${colX(c) - 7 + dx} y=${top} width="14" height=${CELL_H}
               @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,

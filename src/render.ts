@@ -35,6 +35,7 @@ import {
   isMove,
   isNot,
 } from "./ir";
+import { SlotTarget } from "./canvas";
 import { SeriesStep } from "./elements";
 import {
   SeriesInfo,
@@ -314,8 +315,8 @@ export interface CanvasEdit {
     | { kind: "coil"; ni: number; ri: number; ci: number };
   /** The in-progress top-level element drag in this network, or null. */
   drag?: { ri: number; ei: number; drop: number } | null;
-  /** Where a palette element being dragged in would drop, or null. */
-  placeDrop?: { ri: number; index: number } | null;
+  /** Which insertion slot a palette element being dragged in would drop into. */
+  placeDrop?: { ri: number; steps: SeriesStep[]; index: number } | null;
   /**
    * Show insertion slots *inside* branches. True only for a persistently armed
    * element tool (click-to-place), not a palette drag — a drag resolves to the
@@ -329,10 +330,10 @@ export interface CanvasEdit {
   onAddPath?: (ri: number, steps: SeriesStep[], ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
-  /** Reports a rung's y-band and insertion-slot x-positions (drag geometry). */
+  /** Reports a rung's y-band, top-level slot x's, and all drop targets. */
   onGeometry?: (
     ri: number,
-    geom: { top: number; bottom: number; slotXs: number[] },
+    geom: { top: number; bottom: number; slotXs: number[]; targets: SlotTarget[] },
   ) => void;
   /**
    * A pointer went down on a top-level element hit-target. The panel decides
@@ -474,17 +475,28 @@ function renderRung(
       edit.selected.steps.length === 0 &&
       edit.selected.ei === ei;
 
+    // Whether a slot is the current palette drop target (highlighted while dragging).
+    const isDrop = (steps: SeriesStep[], index: number) =>
+      edit.placeDrop != null &&
+      edit.placeDrop.ri === ri &&
+      sameSteps(edit.placeDrop.steps, steps) &&
+      edit.placeDrop.index === index;
+
     let col = 0;
     const slotXs: number[] = [];
+    const targets: SlotTarget[] = [];
+    // Record a top-level slot as a drop target (always) and draw it (armed only).
     const slot = (c: number, index: number) => {
+      slotXs.push(colX(c));
+      targets.push({ steps: [], index, x: colX(c), top: baseY, bottom: baseY + height });
       if (edit.armed !== "element") return;
       painter.parts.push(
-        svg`<rect class="hit-slot" x=${colX(c) - 7} y=${baseY} width="14" height=${height}
+        svg`<rect class="hit-slot ${isDrop([], index) ? "targeted" : ""}"
+          x=${colX(c) - 7} y=${baseY} width="14" height=${height}
           @click=${() => edit.onInsertElement(ri, [], index)} />`,
       );
     };
     rung.series.forEach((el, ei) => {
-      slotXs.push(colX(col));
       slot(col, ei);
       const w = measureElement(el).cols;
       if (edit.armed === null) {
@@ -504,21 +516,12 @@ function renderRung(
       }
       col += w;
     });
-    slotXs.push(colX(col));
     slot(col, rung.series.length);
-    edit.onGeometry?.(ri, { top: baseY, bottom: baseY + height, slotXs });
 
-    // Drop indicator: a vertical marker at the target insertion slot, while
-    // either reordering an existing element or dragging a new one in from the
-    // palette over this rung.
-    const dropAt =
-      edit.drag != null && edit.drag.ri === ri
-        ? edit.drag.drop
-        : edit.placeDrop != null && edit.placeDrop.ri === ri
-          ? edit.placeDrop.index
-          : null;
-    if (dropAt !== null) {
-      const dx = slotXs[dropAt];
+    // Drop indicator for an in-progress *reorder* (a palette drop instead
+    // highlights its target slot via the `targeted` class).
+    if (edit.drag != null && edit.drag.ri === ri) {
+      const dx = slotXs[edit.drag.drop];
       if (dx !== undefined) {
         painter.parts.push(
           svg`<line class="drop-indicator" x1=${dx} y1=${baseY} x2=${dx} y2=${baseY + height} />`,
@@ -590,8 +593,11 @@ function renderRung(
           // branch rather than past the join line.
           const dir = index === last && index !== 0 ? -1 : 1;
           const dx = rank(c, top, top + CELL_H, info.steps.length) * SLOT_SPREAD * dir;
+          const cx = colX(c) + dx;
+          targets.push({ steps: info.steps, index, x: cx, top, bottom: top + CELL_H });
           painter.parts.push(
-            svg`<rect class="hit-slot" x=${colX(c) - 7 + dx} y=${top} width="14" height=${CELL_H}
+            svg`<rect class="hit-slot ${isDrop(info.steps, index) ? "targeted" : ""}"
+              x=${cx - 7} y=${top} width="14" height=${CELL_H}
               @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,
           );
         });
@@ -629,6 +635,9 @@ function renderRung(
         );
       }
     }
+
+    // Report geometry after both passes so `targets` includes nested slots.
+    edit.onGeometry?.(ri, { top: baseY, bottom: baseY + height, slotXs, targets });
   }
 
   return { part: svg`<g>${painter.parts}</g>`, height };

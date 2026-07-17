@@ -8,6 +8,7 @@
  * actual IR edits (via `elements.ts`) live in the panel.
  */
 
+import { SeriesStep } from "./elements";
 import {
   CompareOp,
   Element,
@@ -89,7 +90,49 @@ export interface RungGeom {
   ri: number;
   top: number;
   bottom: number;
+  /** Top-level insertion-slot x-positions (reorder + coil geometry). */
   slotXs: number[];
+  /** Every insertion slot (top-level + nested) as a palette drop target. */
+  targets: SlotTarget[];
+}
+
+/** One insertion slot as a palette-drag drop target, in a rung's SVG space. */
+export interface SlotTarget {
+  steps: SeriesStep[];
+  index: number;
+  x: number;
+  top: number;
+  bottom: number;
+}
+
+/** A drop target flattened with its rung index (for cross-rung resolution). */
+export interface RungDropTarget extends SlotTarget {
+  ri: number;
+}
+
+/**
+ * The insertion slot nearest a pointer at (x, y): among the slots whose vertical
+ * band contains y, the one with the smallest horizontal distance; deeper
+ * (more-nested) slots win exact ties so a drop at a branch entry lands inside.
+ * Returns null when y is over no slot's band (e.g. an inter-rung gap), so a drop
+ * there places nothing.
+ */
+export function nearestTarget(
+  targets: RungDropTarget[],
+  x: number,
+  y: number,
+): RungDropTarget | null {
+  let best: RungDropTarget | null = null;
+  let bestScore = Infinity;
+  for (const t of targets) {
+    if (y < t.top || y > t.bottom) continue;
+    const score = Math.abs(t.x - x) - t.steps.length * 0.001;
+    if (score < bestScore) {
+      bestScore = score;
+      best = t;
+    }
+  }
+  return best;
 }
 
 /**

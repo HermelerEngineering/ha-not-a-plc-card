@@ -116,7 +116,14 @@ import {
   updateCoil,
   updateElementIn,
 } from "./elements";
-import { RungGeom, ToolTarget, hitRung, nearestSlot, reorderDelta } from "./canvas";
+import {
+  RungGeom,
+  ToolTarget,
+  hitRung,
+  nearestSlot,
+  nearestTarget,
+  reorderDelta,
+} from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { validateProgram } from "./validate";
 import { CanvasEdit, RUNG_GAP, renderNetwork } from "./render";
@@ -180,6 +187,13 @@ function wsErrorMessage(err: unknown): string {
   return String(err);
 }
 
+/** A stable identity for a place-drag target, to skip redundant re-renders. */
+function placeKey(t?: { ni: number; ri: number; steps: SeriesStep[]; index: number }): string {
+  if (!t) return "";
+  const steps = t.steps.map((s) => `${s.index}.${s.path}`).join("-");
+  return `${t.ni}|${t.ri}|${steps}|${t.index}`;
+}
+
 @defineOnce("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
@@ -198,7 +212,12 @@ export class NotAPlcPanel extends LitElement {
   @state() private _drag?: { ni: number; ri: number; ei: number; drop: number };
   /** In-progress palette element being dragged onto the live view, and its target. */
   @state() private _placeTool?: Tool;
-  @state() private _placeTarget?: { ni: number; ri: number; index: number };
+  @state() private _placeTarget?: {
+    ni: number;
+    ri: number;
+    steps: SeriesStep[];
+    index: number;
+  };
 
   private _unsub?: () => void;
   /** Per-network rung geometry reported by the renderer (rebuilt each render). */
@@ -1426,16 +1445,20 @@ export class NotAPlcPanel extends LitElement {
       return;
     }
     const { x, y } = this._toUserXY(svg, ev.clientX, ev.clientY);
-    // A coil appends below the stack, which can sit past the rung's series band,
-    // so let a coil drop reach down through the inter-rung gap.
-    const pad = tool.target === "coil" ? RUNG_GAP : 0;
-    const hit = hitRung(geoms, x, y, pad);
-    const next = hit ? { ni, ri: hit.ri, index: hit.index } : undefined;
+    let next: typeof this._placeTarget;
+    if (tool.target === "coil") {
+      // A coil appends below the stack, past the rung's series band, so let a
+      // coil drop reach down through the inter-rung gap.
+      const hit = hitRung(geoms, x, y, RUNG_GAP);
+      next = hit ? { ni, ri: hit.ri, steps: [], index: hit.index } : undefined;
+    } else {
+      // An element can land in any insertion slot, top-level or inside a branch.
+      const all = geoms.flatMap((g) => g.targets.map((t) => ({ ...t, ri: g.ri })));
+      const t = nearestTarget(all, x, y);
+      next = t ? { ni, ri: t.ri, steps: t.steps, index: t.index } : undefined;
+    }
     // Only re-render when the resolved target actually changes.
-    const cur = this._placeTarget;
-    const same =
-      cur && next && cur.ni === next.ni && cur.ri === next.ri && cur.index === next.index;
-    if (!same && (cur || next)) this._placeTarget = next;
+    if (placeKey(next) !== placeKey(this._placeTarget)) this._placeTarget = next;
   }
 
   private _placeUp(): void {
@@ -1452,22 +1475,32 @@ export class NotAPlcPanel extends LitElement {
       return;
     }
     // A coil tool appends to the rung it was dropped on; an element tool inserts
-    // at the nearest series slot.
+    // at the resolved slot (which may be inside a branch path).
     if (target) {
-      const index = tool.target === "coil" ? Infinity : target.index;
-      this._insertTool(tool, target.ni, target.ri, index);
+      this._insertTool(tool, target.ni, target.ri, target.steps, target.index);
     }
   }
 
-  /** Insert a fresh element/coil from `tool` at a top-level position in a rung. */
-  private _insertTool(tool: Tool, ni: number, ri: number, index: number): void {
+  /**
+   * Insert a fresh element/coil from `tool` at a position in a rung, then select
+   * it (place-then-configure). Coils ignore `steps` and append.
+   */
+  private _insertTool(
+    tool: Tool,
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+    index: number,
+  ): void {
     if (!this._program) return;
     if (tool.target === "coil") {
       const coils = this._program.networks[ni]?.rungs[ri]?.coils.length ?? 0;
-      const at = Number.isFinite(index) ? Math.min(index, coils) : coils;
+      const at = Math.min(index, coils);
       this._update(insertCoil(this._program, ni, ri, at, tool.make() as Output));
+      this._sel = { kind: "coil", ni, ri, ci: at };
     } else {
-      this._update(insertElementIn(this._program, ni, ri, [], index, tool.make() as Element));
+      this._update(insertElementIn(this._program, ni, ri, steps, index, tool.make() as Element));
+      this._sel = { kind: "el", ni, ri, steps, ei: index };
     }
   }
 
@@ -1527,7 +1560,7 @@ export class NotAPlcPanel extends LitElement {
     let placeDrop: CanvasEdit["placeDrop"] = null;
     const pt = this._placeTarget;
     if (this._placeTool?.target === "element" && pt && pt.ni === ni) {
-      placeDrop = { ri: pt.ri, index: pt.index };
+      placeDrop = { ri: pt.ri, steps: pt.steps, index: pt.index };
     }
     return {
       ni,
@@ -1540,9 +1573,10 @@ export class NotAPlcPanel extends LitElement {
           ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
           : null,
       placeDrop,
-      // Nested insert slots only for a persistently armed element tool, not a
-      // palette drag (which resolves to the top level only).
-      allowNestedInsert: !this._placeTool && this._tool?.target === "element",
+      // Show nested insert slots for a persistently armed element tool, or while
+      // dragging an element in from the palette (so it can land inside a branch).
+      allowNestedInsert:
+        this._tool?.target === "element" || this._placeTool?.target === "element",
       onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
       onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
       onAddPath: (ri, steps, ei) => this._addBranchPath(ni, ri, steps, ei),
@@ -2078,6 +2112,10 @@ export class NotAPlcPanel extends LitElement {
     }
     .cv-svg .hit-slot:hover {
       fill: var(--primary-color);
+    }
+    .cv-svg .hit-slot.targeted {
+      fill: var(--primary-color);
+      stroke-dasharray: none;
     }
     .cv-svg .sel-outline {
       fill: none;

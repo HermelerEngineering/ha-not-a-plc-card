@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { elementLabel, hitRung, nearestSlot, reorderDelta } from "../src/canvas";
+import {
+  RungDropTarget,
+  elementLabel,
+  hitRung,
+  nearestSlot,
+  nearestTarget,
+  reorderDelta,
+} from "../src/canvas";
 
 describe("elementLabel", () => {
   it("labels each element type compactly", () => {
@@ -70,5 +77,25 @@ describe("hitRung", () => {
     expect(hitRung(geoms, 58, 46, 12)).toEqual({ ri: 0, index: 1 });
     // The extended zone stops at the next rung's top, so rung 1 still wins there.
     expect(hitRung(geoms, 12, 60, 12)).toEqual({ ri: 1, index: 0 });
+  });
+});
+
+describe("nearestTarget", () => {
+  // A top-level slot (full-height band) and a nested slot in row 0 of a branch.
+  const targets: RungDropTarget[] = [
+    { ri: 0, steps: [], index: 1, x: 100, top: 0, bottom: 56 },
+    { ri: 0, steps: [{ index: 1, path: 0 }], index: 0, x: 115, top: 0, bottom: 28 },
+    { ri: 0, steps: [], index: 2, x: 200, top: 0, bottom: 56 },
+  ];
+  it("picks the horizontally nearest slot whose band contains y", () => {
+    // Near the top-level slot column.
+    expect(nearestTarget(targets, 101, 40)?.index).toBe(1);
+    // Near the nested slot (only in-band for the top half) → inside the branch.
+    expect(nearestTarget(targets, 116, 10)?.steps).toEqual([{ index: 1, path: 0 }]);
+    // In the lower half, the nested slot's band excludes y, so top-level wins.
+    expect(nearestTarget(targets, 116, 45)?.steps).toEqual([]);
+  });
+  it("returns null when y is over no band (e.g. below every slot)", () => {
+    expect(nearestTarget(targets, 100, 999)).toBeNull();
   });
 });

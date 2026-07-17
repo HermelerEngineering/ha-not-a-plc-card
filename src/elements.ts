@@ -331,6 +331,23 @@ export function newBranch(): BranchEl {
   return { branch: [[], []] };
 }
 
+/**
+ * Append an OR-path (default empty) to the branch element at `ei` in the series
+ * addressed by `steps`. A no-op if that element is not a branch.
+ */
+export function addBranchPath(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+  path: Element[] = [],
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) =>
+    mapAt(s, ei, (el) => (isBranch(el) ? { branch: [...el.branch, path] } : el)),
+  );
+}
+
 export function newNot(): NotEl {
   return { type: "not" };
 }

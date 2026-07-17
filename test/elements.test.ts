@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Program } from "../src/ir";
 import { BranchEl, Coil, ContactEl } from "../src/ir";
 import {
+  addBranchPath,
   addCoil,
   addElement,
   addElementIn,
@@ -228,6 +229,20 @@ describe("nested series editing (SeriesStep path)", () => {
     p = removeElementIn(p, 0, 0, [{ index: 0, path: 1 }], 0);
     branch = p.networks[0].rungs[0].series[0] as BranchEl;
     expect(branch.branch[1]).toHaveLength(0);
+  });
+
+  it("addBranchPath appends an OR-path (empty or seeded with an element)", () => {
+    // Empty path appended: branch goes from 2 to 3 paths.
+    let p = addBranchPath(progNested(), 0, 0, [], 0);
+    let branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect(branch.branch).toHaveLength(3);
+    expect(branch.branch[2]).toEqual([]);
+
+    // Seeded path: the new (4th) path carries the given element.
+    p = addBranchPath(p, 0, 0, [], 0, [newContact("a")]);
+    branch = p.networks[0].rungs[0].series[0] as BranchEl;
+    expect(branch.branch).toHaveLength(4);
+    expect((branch.branch[3][0] as ContactEl).tag).toBe("a");
   });
 
   it("adds an inline NOT into a branch path alongside contacts", () => {

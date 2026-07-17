@@ -89,6 +89,7 @@ import {
 } from "./fbs";
 import {
   SeriesStep,
+  addBranchPath,
   addCoil,
   addElementIn,
   addNetwork,
@@ -1275,6 +1276,17 @@ export class NotAPlcPanel extends LitElement {
     this._update(insertCoil(this._program, ni, ri, index, output));
   }
 
+  /**
+   * Add a new OR-path to a branch. If an element tool is armed, seed the path
+   * with that element; otherwise add an empty path (fill it via its slots).
+   */
+  private _addBranchPath(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
+    if (!this._program) return;
+    const tool = this._tool;
+    const path: Element[] = tool?.target === "element" ? [tool.make() as Element] : [];
+    this._update(addBranchPath(this._program, ni, ri, steps, ei, path));
+  }
+
   private _selectEl(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
     if (this._tool) return; // placing, not selecting
     this._sel = { kind: "el", ni, ri, steps, ei };
@@ -1499,6 +1511,7 @@ export class NotAPlcPanel extends LitElement {
       allowNestedInsert: !this._placeTool && this._tool?.target === "element",
       onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
       onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
+      onAddPath: (ri, steps, ei) => this._addBranchPath(ni, ri, steps, ei),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
       onGeometry: (ri, geom) => {
@@ -1969,6 +1982,24 @@ export class NotAPlcPanel extends LitElement {
       stroke-width: 2.5;
       stroke-linecap: round;
       pointer-events: none;
+    }
+    .cv-svg .add-path {
+      cursor: pointer;
+    }
+    .cv-svg .add-path circle {
+      fill: var(--card-background-color, #fff);
+      stroke: var(--primary-color);
+      stroke-width: 1.5;
+    }
+    .cv-svg .add-path text {
+      fill: var(--primary-color);
+      text-anchor: middle;
+      font-size: 15px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .cv-svg .add-path:hover circle {
+      fill: color-mix(in srgb, var(--primary-color) 18%, transparent);
     }
     .cv-svg .hit-el.sel {
       fill: color-mix(in srgb, var(--primary-color) 16%, transparent);

@@ -27,6 +27,7 @@ import {
   NotEl,
   Rung,
   StateImage,
+  isBranch,
   isCalc,
   isCompare,
   isContact,
@@ -316,6 +317,8 @@ export interface CanvasEdit {
   onInsertElement: (ri: number, steps: SeriesStep[], index: number) => void;
   /** Select an element for the inspector (steps = [] for a top-level element). */
   onSelectElement: (ri: number, steps: SeriesStep[], ei: number) => void;
+  /** Add a new OR-path to the branch at `ei` in the series at `steps`. */
+  onAddPath?: (ri: number, steps: SeriesStep[], ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
   /** Reports a rung's y-band and insertion-slot x-positions (drag geometry). */
@@ -572,6 +575,22 @@ function renderRung(
           svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${x} y=${baseY + cell.row * CELL_H}
             width=${colX(cell.col + cell.cols) - x} height=${cell.rows * CELL_H}
             @click=${() => edit.onSelectElement(ri, cell.steps, cell.ei)} />`,
+        );
+      }
+    }
+
+    // A "+ path" control at the bottom-left of every branch, so a new OR-path can
+    // be added on the canvas (arm an element tool first to seed the path with it).
+    if (edit.onAddPath) {
+      for (const cell of walk.cells) {
+        if (!isBranch(cell.el)) continue;
+        const bx = colX(cell.col);
+        const by = baseY + (cell.row + cell.rows) * CELL_H - 13;
+        painter.parts.push(
+          svg`<g class="add-path" @click=${() => edit.onAddPath?.(ri, cell.steps, cell.ei)}>
+            <circle cx=${bx} cy=${by} r="9" />
+            <text x=${bx} y=${by + 4}>+</text>
+          </g>`,
         );
       }
     }

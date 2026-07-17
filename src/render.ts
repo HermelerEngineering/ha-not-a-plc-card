@@ -34,6 +34,8 @@ import {
   isMove,
   isNot,
 } from "./ir";
+import { SeriesStep } from "./elements";
+import { measureElement, measureSeries, sameSteps, walkSeries } from "./layout";
 import { PowerFlow } from "./power-flow";
 
 const CALC_SYMBOL: Record<string, string> = {
@@ -66,37 +68,6 @@ const RAIL_W = 10;
 const SYMBOL_HALF = 9;
 /** Vertical gap between stacked rungs in a network. */
 export const RUNG_GAP = 12;
-
-interface Measure {
-  cols: number;
-  rows: number;
-}
-
-function measureElement(el: Element): Measure {
-  if (isContact(el)) return { cols: 1, rows: 1 };
-  if (isCompare(el)) return { cols: 1, rows: 1 };
-  if (isFb(el)) return { cols: 1, rows: 1 };
-  if (isNot(el)) return { cols: 1, rows: 1 };
-  let cols = 1;
-  let rows = 0;
-  for (const path of el.branch) {
-    const m = measureSeries(path);
-    cols = Math.max(cols, m.cols);
-    rows += m.rows;
-  }
-  return { cols, rows };
-}
-
-function measureSeries(els: Element[]): Measure {
-  let cols = 0;
-  let rows = 1;
-  for (const el of els) {
-    const m = measureElement(el);
-    cols += m.cols;
-    rows = Math.max(rows, m.rows);
-  }
-  return { cols: Math.max(cols, 1), rows };
-}
 
 /** Pixel X of the left edge of grid column `col` within a rung. */
 function colX(col: number): number {
@@ -330,13 +301,21 @@ export interface CanvasEdit {
   /** What the armed palette tool places, or null in "select" mode. */
   armed: "element" | "coil" | null;
   selected?:
-    | { kind: "el"; ni: number; ri: number; ei: number }
+    | { kind: "el"; ni: number; ri: number; steps: SeriesStep[]; ei: number }
     | { kind: "coil"; ni: number; ri: number; ci: number };
   /** The in-progress top-level element drag in this network, or null. */
   drag?: { ri: number; ei: number; drop: number } | null;
   /** Where a palette element being dragged in would drop, or null. */
   placeDrop?: { ri: number; index: number } | null;
-  onInsertElement: (ri: number, index: number) => void;
+  /**
+   * Show insertion slots *inside* branches. True only for a persistently armed
+   * element tool (click-to-place), not a palette drag — a drag resolves to the
+   * top level only, so nested slots would be misleading.
+   */
+  allowNestedInsert?: boolean;
+  onInsertElement: (ri: number, steps: SeriesStep[], index: number) => void;
+  /** Select an element for the inspector (steps = [] for a top-level element). */
+  onSelectElement: (ri: number, steps: SeriesStep[], ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
   /** Reports a rung's y-band and insertion-slot x-positions (drag geometry). */
@@ -481,6 +460,7 @@ function renderRung(
       edit.selected?.kind === "el" &&
       edit.selected.ni === edit.ni &&
       edit.selected.ri === ri &&
+      edit.selected.steps.length === 0 &&
       edit.selected.ei === ei;
 
     let col = 0;
@@ -489,7 +469,7 @@ function renderRung(
       if (edit.armed !== "element") return;
       painter.parts.push(
         svg`<rect class="hit-slot" x=${colX(c) - 7} y=${baseY} width="14" height=${height}
-          @click=${() => edit.onInsertElement(ri, index)} />`,
+          @click=${() => edit.onInsertElement(ri, [], index)} />`,
       );
     };
     rung.series.forEach((el, ei) => {
@@ -560,6 +540,40 @@ function renderRung(
         svg`<rect class="hit-slot" x=${coilX} y=${cy - CELL_H / 2} width=${CELL_W} height="14"
           @click=${() => edit.onInsertCoil(ri, rung.coils.length)} />`,
       );
+    }
+
+    // Nested (branch-path) editing: hit-targets for elements *inside* branches,
+    // addressed by their SeriesStep path. Top-level (steps=[]) is handled above,
+    // so here we descend into branches only. Parent-before-child walk order puts
+    // child targets on top, so clicking a sub-element wins over its branch box.
+    const walk = walkSeries(rung.series);
+    if (edit.allowNestedInsert) {
+      for (const info of walk.series) {
+        if (info.steps.length === 0) continue;
+        const y = baseY + info.row * CELL_H;
+        info.slotCols.forEach((c, index) => {
+          painter.parts.push(
+            svg`<rect class="hit-slot" x=${colX(c) - 7} y=${y} width="14" height=${CELL_H}
+              @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,
+          );
+        });
+      }
+    } else if (edit.armed === null) {
+      for (const cell of walk.cells) {
+        if (cell.steps.length === 0) continue;
+        const sel =
+          edit.selected?.kind === "el" &&
+          edit.selected.ni === edit.ni &&
+          edit.selected.ri === ri &&
+          sameSteps(edit.selected.steps, cell.steps) &&
+          edit.selected.ei === cell.ei;
+        const x = colX(cell.col);
+        painter.parts.push(
+          svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${x} y=${baseY + cell.row * CELL_H}
+            width=${colX(cell.col + cell.cols) - x} height=${cell.rows * CELL_H}
+            @click=${() => edit.onSelectElement(ri, cell.steps, cell.ei)} />`,
+        );
+      }
     }
   }
 

@@ -1475,7 +1475,7 @@ export class NotAPlcPanel extends LitElement {
     if (this._sel && this._sel.ni === ni) {
       selected =
         this._sel.kind === "el"
-          ? { kind: "el", ni, ri: this._sel.ri, ei: this._sel.ei }
+          ? { kind: "el", ni, ri: this._sel.ri, steps: this._sel.steps, ei: this._sel.ei }
           : { kind: "coil", ni, ri: this._sel.ri, ci: this._sel.ci };
     }
     let placeDrop: CanvasEdit["placeDrop"] = null;
@@ -1494,7 +1494,11 @@ export class NotAPlcPanel extends LitElement {
           ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
           : null,
       placeDrop,
-      onInsertElement: (ri, index) => this._placeElement(ni, ri, [], index),
+      // Nested insert slots only for a persistently armed element tool, not a
+      // palette drag (which resolves to the top level only).
+      allowNestedInsert: !this._placeTool && this._tool?.target === "element",
+      onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
+      onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
       onGeometry: (ri, geom) => {

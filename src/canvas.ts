@@ -83,3 +83,27 @@ export function reorderDelta(ei: number, drop: number): number {
   const target = drop <= ei ? drop : drop - 1;
   return target - ei;
 }
+
+/** A rung's interaction geometry within its network SVG (user-space units). */
+export interface RungGeom {
+  ri: number;
+  top: number;
+  bottom: number;
+  slotXs: number[];
+}
+
+/**
+ * Given a network's rung geometries and a pointer at (x, y) in that SVG's user
+ * space, the rung the pointer is over and the nearest insertion slot in it —
+ * used to drop a palette element onto the live view. Returns null when the
+ * pointer is not over any rung's band.
+ */
+export function hitRung(
+  geoms: RungGeom[],
+  x: number,
+  y: number,
+): { ri: number; index: number } | null {
+  const g = geoms.find((r) => y >= r.top && y <= r.bottom);
+  if (!g) return null;
+  return { ri: g.ri, index: nearestSlot(g.slotXs, x) };
+}

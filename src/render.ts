@@ -332,11 +332,16 @@ export interface CanvasEdit {
     | { kind: "coil"; ni: number; ri: number; ci: number };
   /** The in-progress top-level element drag in this network, or null. */
   drag?: { ri: number; ei: number; drop: number } | null;
+  /** Where a palette element being dragged in would drop, or null. */
+  placeDrop?: { ri: number; index: number } | null;
   onInsertElement: (ri: number, index: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
-  /** Reports the x of each top-level insertion slot for a rung (drag geometry). */
-  onGeometry?: (ri: number, slotXs: number[]) => void;
+  /** Reports a rung's y-band and insertion-slot x-positions (drag geometry). */
+  onGeometry?: (
+    ri: number,
+    geom: { top: number; bottom: number; slotXs: number[] },
+  ) => void;
   /**
    * A pointer went down on a top-level element hit-target. The panel decides
    * whether it becomes a drag (moved) or a select (released in place).
@@ -508,12 +513,19 @@ function renderRung(
     });
     slotXs.push(colX(col));
     slot(col, rung.series.length);
-    edit.onGeometry?.(ri, slotXs);
+    edit.onGeometry?.(ri, { top: baseY, bottom: baseY + height, slotXs });
 
-    // Drop indicator: a vertical marker at the target insertion slot while a
-    // top-level element in this rung is being dragged.
-    if (edit.drag != null && edit.drag.ri === ri) {
-      const dx = slotXs[edit.drag.drop];
+    // Drop indicator: a vertical marker at the target insertion slot, while
+    // either reordering an existing element or dragging a new one in from the
+    // palette over this rung.
+    const dropAt =
+      edit.drag != null && edit.drag.ri === ri
+        ? edit.drag.drop
+        : edit.placeDrop != null && edit.placeDrop.ri === ri
+          ? edit.placeDrop.index
+          : null;
+    if (dropAt !== null) {
+      const dx = slotXs[dropAt];
       if (dx !== undefined) {
         painter.parts.push(
           svg`<line class="drop-indicator" x1=${dx} y1=${baseY} x2=${dx} y2=${baseY + height} />`,

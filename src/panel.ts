@@ -115,7 +115,7 @@ import {
   updateCoil,
   updateElementIn,
 } from "./elements";
-import { ToolTarget, nearestSlot, reorderDelta } from "./canvas";
+import { RungGeom, ToolTarget, hitRung, nearestSlot, reorderDelta } from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { CanvasEdit, renderNetwork } from "./render";
 import {
@@ -181,15 +181,23 @@ export class NotAPlcPanel extends LitElement {
   @state() private _sel?: Selection;
   /** In-progress top-level element drag (pointer-drag reorder, stage C). */
   @state() private _drag?: { ni: number; ri: number; ei: number; drop: number };
+  /** In-progress palette element being dragged onto the live view, and its target. */
+  @state() private _placeTool?: Tool;
+  @state() private _placeTarget?: { ni: number; ri: number; index: number };
 
   private _unsub?: () => void;
-  /** Per-rung insertion-slot x-positions reported by the renderer, `${ni}:${ri}`. */
-  private _geom = new Map<string, number[]>();
+  /** Per-network rung geometry reported by the renderer (rebuilt each render). */
+  private _geom = new Map<number, RungGeom[]>();
   private _dragSvg: SVGSVGElement | null = null;
   private _dragStartX = 0;
   private _dragMoved = false;
+  private _placeStartX = 0;
+  private _placeStartY = 0;
+  private _placeMoved = false;
   private readonly _onDragMove = (ev: PointerEvent) => this._dragMove(ev);
   private readonly _onDragUp = () => this._dragUp();
+  private readonly _onPlaceMove = (ev: PointerEvent) => this._placeMove(ev);
+  private readonly _onPlaceUp = () => this._placeUp();
 
   protected updated(): void {
     if (this.hass && !this._loaded) {
@@ -204,6 +212,8 @@ export class NotAPlcPanel extends LitElement {
     this._unsub = undefined;
     window.removeEventListener("pointermove", this._onDragMove);
     window.removeEventListener("pointerup", this._onDragUp);
+    window.removeEventListener("pointermove", this._onPlaceMove);
+    window.removeEventListener("pointerup", this._onPlaceUp);
   }
 
   private async _init(): Promise<void> {
@@ -1290,22 +1300,29 @@ export class NotAPlcPanel extends LitElement {
     window.addEventListener("pointerup", this._onDragUp);
   }
 
-  private _toUserX(svg: SVGSVGElement, clientX: number): number {
+  private _toUserXY(
+    svg: SVGSVGElement,
+    clientX: number,
+    clientY: number,
+  ): { x: number; y: number } {
     const ctm = svg.getScreenCTM();
-    if (!ctm) return clientX;
+    if (!ctm) return { x: clientX, y: clientY };
     const pt = svg.createSVGPoint();
     pt.x = clientX;
-    pt.y = 0;
-    return pt.matrixTransform(ctm.inverse()).x;
+    pt.y = clientY;
+    const p = pt.matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
   }
 
   private _dragMove(ev: PointerEvent): void {
-    if (!this._drag || !this._dragSvg) return;
+    const d = this._drag;
+    if (!d || !this._dragSvg) return;
     if (Math.abs(ev.clientX - this._dragStartX) > 4) this._dragMoved = true;
-    const slots = this._geom.get(`${this._drag.ni}:${this._drag.ri}`);
-    if (!slots) return;
-    const drop = nearestSlot(slots, this._toUserX(this._dragSvg, ev.clientX));
-    if (drop !== this._drag.drop) this._drag = { ...this._drag, drop };
+    const geom = this._geom.get(d.ni)?.find((g) => g.ri === d.ri);
+    if (!geom) return;
+    const { x } = this._toUserXY(this._dragSvg, ev.clientX, ev.clientY);
+    const drop = nearestSlot(geom.slotXs, x);
+    if (drop !== d.drop) this._drag = { ...d, drop };
   }
 
   private _dragUp(): void {
@@ -1326,7 +1343,87 @@ export class NotAPlcPanel extends LitElement {
     }
   }
 
+  // --- drag a new element from the palette onto the live view ----------------
+
+  private _chipPointerDown(tool: Tool, ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); // don't start a text selection while dragging
+    this._placeTool = tool;
+    this._placeTarget = undefined;
+    this._placeStartX = ev.clientX;
+    this._placeStartY = ev.clientY;
+    this._placeMoved = false;
+    window.addEventListener("pointermove", this._onPlaceMove);
+    window.addEventListener("pointerup", this._onPlaceUp);
+  }
+
+  /** The `<svg class="cv-svg">` under the pointer (in this panel's shadow root). */
+  private _canvasUnder(clientX: number, clientY: number): SVGSVGElement | null {
+    const node = this.shadowRoot?.elementFromPoint(clientX, clientY) ?? null;
+    return (node?.closest("svg.cv-svg") as SVGSVGElement | null) ?? null;
+  }
+
+  private _placeMove(ev: PointerEvent): void {
+    if (!this._placeTool) return;
+    if (
+      Math.abs(ev.clientX - this._placeStartX) > 4 ||
+      Math.abs(ev.clientY - this._placeStartY) > 4
+    ) {
+      this._placeMoved = true;
+    }
+    const svg = this._canvasUnder(ev.clientX, ev.clientY);
+    const ni = svg ? Number(svg.dataset.ni) : NaN;
+    const geoms = svg ? this._geom.get(ni) : undefined;
+    if (!svg || !geoms) {
+      if (this._placeTarget) this._placeTarget = undefined;
+      return;
+    }
+    const { x, y } = this._toUserXY(svg, ev.clientX, ev.clientY);
+    const hit = hitRung(geoms, x, y);
+    const next = hit ? { ni, ri: hit.ri, index: hit.index } : undefined;
+    // Only re-render when the resolved target actually changes.
+    const cur = this._placeTarget;
+    const same =
+      cur && next && cur.ni === next.ni && cur.ri === next.ri && cur.index === next.index;
+    if (!same && (cur || next)) this._placeTarget = next;
+  }
+
+  private _placeUp(): void {
+    window.removeEventListener("pointermove", this._onPlaceMove);
+    window.removeEventListener("pointerup", this._onPlaceUp);
+    const tool = this._placeTool;
+    const target = this._placeTarget;
+    this._placeTool = undefined;
+    this._placeTarget = undefined;
+    if (!tool) return;
+    // A press-release without a drag behaves like the old click: arm the tool.
+    if (!this._placeMoved) {
+      this._armTool(tool);
+      return;
+    }
+    // A coil tool appends to the rung it was dropped on; an element tool inserts
+    // at the nearest series slot.
+    if (target) {
+      const index = tool.target === "coil" ? Infinity : target.index;
+      this._insertTool(tool, target.ni, target.ri, index);
+    }
+  }
+
+  /** Insert a fresh element/coil from `tool` at a top-level position in a rung. */
+  private _insertTool(tool: Tool, ni: number, ri: number, index: number): void {
+    if (!this._program) return;
+    if (tool.target === "coil") {
+      const coils = this._program.networks[ni]?.rungs[ri]?.coils.length ?? 0;
+      const at = Number.isFinite(index) ? Math.min(index, coils) : coils;
+      this._update(insertCoil(this._program, ni, ri, at, tool.make() as Output));
+    } else {
+      this._update(insertElementIn(this._program, ni, ri, [], index, tool.make() as Element));
+    }
+  }
+
   private _renderCanvas(): TemplateResult {
+    // Rebuilt from scratch by the renderer's onGeometry callbacks below.
+    this._geom = new Map();
     if (!this._program) return html``;
     return html`
       <div class="tags-header">
@@ -1342,8 +1439,9 @@ export class NotAPlcPanel extends LitElement {
         <span class="palette-label">Place:</span>
         ${this._tools().map(
           (t) => html`<button
-            class="chip ${this._tool?.label === t.label ? "armed" : ""}"
-            @click=${() => this._armTool(t)}
+            class="chip draggable ${this._tool?.label === t.label ? "armed" : ""}
+              ${this._placeTool?.label === t.label ? "dragging" : ""}"
+            @pointerdown=${(ev: PointerEvent) => this._chipPointerDown(t, ev)}
           >
             ${t.label}
           </button>`,
@@ -1356,9 +1454,11 @@ export class NotAPlcPanel extends LitElement {
         </button>
       </div>
       <div class="hint">
-        ${this._tool
-          ? `Click a ＋ slot to place “${this._tool.label}”.`
-          : "Click an element to edit it below, or drag it to reorder."}
+        ${this._placeTool
+          ? `Drag onto a rung to place “${this._placeTool.label}”.`
+          : this._tool
+            ? `Drag a tool onto the ladder, or click a ＋ slot to place “${this._tool.label}”.`
+            : "Drag a tool onto the ladder to add it. Click an element to edit it, or drag it to reorder."}
       </div>
       ${this._program.networks.map((net, ni) => this._renderCanvasNetwork(net, ni))}
       ${this._renderInspector()}
@@ -1374,18 +1474,30 @@ export class NotAPlcPanel extends LitElement {
           ? { kind: "el", ni, ri: this._sel.ri, ei: this._sel.ei }
           : { kind: "coil", ni, ri: this._sel.ri, ci: this._sel.ci };
     }
+    let placeDrop: CanvasEdit["placeDrop"] = null;
+    const pt = this._placeTarget;
+    if (this._placeTool?.target === "element" && pt && pt.ni === ni) {
+      placeDrop = { ri: pt.ri, index: pt.index };
+    }
     return {
       ni,
-      armed: this._tool?.target ?? null,
+      // While dragging a palette tool, arm its target so the insert slots show
+      // (the active drag wins over any persistently armed tool).
+      armed: this._placeTool?.target ?? this._tool?.target ?? null,
       selected,
       drag:
         this._drag?.ni === ni
           ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
           : null,
+      placeDrop,
       onInsertElement: (ri, index) => this._placeElement(ni, ri, [], index),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
-      onGeometry: (ri, slotXs) => this._geom.set(`${ni}:${ri}`, slotXs),
+      onGeometry: (ri, geom) => {
+        const arr = this._geom.get(ni) ?? [];
+        arr.push({ ri, ...geom });
+        this._geom.set(ni, arr);
+      },
       onElementPointerDown: (ri, ei, ev) => this._elPointerDown(ni, ri, ei, ev),
     };
   }
@@ -1418,7 +1530,8 @@ export class NotAPlcPanel extends LitElement {
           </button>
         </div>
         <svg
-          class="cv-svg ${this._tool ? "arming" : ""}"
+          class="cv-svg ${this._tool || this._placeTool ? "arming" : ""}"
+          data-ni=${ni}
           viewBox="0 0 ${VIEW_WIDTH} ${rendered.height}"
           width="100%"
           role="img"
@@ -1801,6 +1914,14 @@ export class NotAPlcPanel extends LitElement {
       background: var(--primary-color);
       color: var(--text-primary-color, #fff);
       outline: 2px solid var(--primary-color);
+    }
+    button.chip.draggable {
+      cursor: grab;
+      touch-action: none;
+    }
+    button.chip.dragging {
+      cursor: grabbing;
+      outline: 2px dashed var(--primary-color);
     }
     .cv-net {
       border: 1px solid var(--divider-color, #ddd);

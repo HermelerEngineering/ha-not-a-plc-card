@@ -118,6 +118,7 @@ import {
 } from "./elements";
 import { RungGeom, ToolTarget, hitRung, nearestSlot, reorderDelta } from "./canvas";
 import { computePowerFlow } from "./power-flow";
+import { validateProgram } from "./validate";
 import { CanvasEdit, RUNG_GAP, renderNetwork } from "./render";
 import {
   BOOL_DOMAINS,
@@ -477,6 +478,7 @@ export class NotAPlcPanel extends LitElement {
       <div class="body">
         <section class="preview">${this._renderPreview()}</section>
         <section class="edit">
+          ${this._renderValidation()}
           ${this._renderTags()}
           ${this._renderFbs()}
           <details open>
@@ -1587,6 +1589,34 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
+  private _renderValidation(): TemplateResult {
+    if (!this._program) return html``;
+    const issues = validateProgram(this._program);
+    if (issues.length === 0) {
+      return html`<div class="validation ok">✓ No problems found</div>`;
+    }
+    const errors = issues.filter((i) => i.level === "error").length;
+    const warns = issues.length - errors;
+    const summary = [
+      errors ? `${errors} error${errors > 1 ? "s" : ""}` : "",
+      warns ? `${warns} warning${warns > 1 ? "s" : ""}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return html`
+      <details class="validation bad" open>
+        <summary>${summary} — fix before saving</summary>
+        <ul>
+          ${issues.map(
+            (i) => html`<li class="v-${i.level}">
+              <span class="v-loc">${i.location}</span> ${i.message}
+            </li>`,
+          )}
+        </ul>
+      </details>
+    `;
+  }
+
   private _renderPreview(): TemplateResult {
     if (!this._program) return html`<div class="hint">Loading…</div>`;
     if (this._program.networks.length === 0) {
@@ -2028,6 +2058,39 @@ export class NotAPlcPanel extends LitElement {
       border: 1px solid var(--primary-color);
       border-radius: 8px;
       background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+    }
+    .validation {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.9em;
+    }
+    .validation.ok {
+      color: var(--success-color, #2e7d32);
+      background: color-mix(in srgb, var(--success-color, #2e7d32) 10%, transparent);
+    }
+    .validation.bad {
+      background: color-mix(in srgb, var(--error-color, #c62828) 10%, transparent);
+    }
+    .validation.bad summary {
+      cursor: pointer;
+      font-weight: 500;
+      color: var(--error-color, #c62828);
+    }
+    .validation ul {
+      margin: 8px 0 2px;
+      padding-left: 18px;
+    }
+    .validation li {
+      margin: 2px 0;
+    }
+    .validation li.v-warning {
+      color: var(--warning-color, #ef6c00);
+    }
+    .validation .v-loc {
+      font-family: monospace;
+      opacity: 0.8;
+      margin-right: 4px;
     }
     .rail {
       stroke: var(--primary-text-color);

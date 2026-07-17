@@ -36,7 +36,13 @@ import {
   isNot,
 } from "./ir";
 import { SeriesStep } from "./elements";
-import { measureElement, measureSeries, sameSteps, walkSeries } from "./layout";
+import {
+  SeriesInfo,
+  measureElement,
+  measureSeries,
+  sameSteps,
+  walkSeries,
+} from "./layout";
 import { PowerFlow } from "./power-flow";
 
 const CALC_SYMBOL: Record<string, string> = {
@@ -69,6 +75,8 @@ const RAIL_W = 10;
 const SYMBOL_HALF = 9;
 /** Vertical gap between stacked rungs in a network. */
 export const RUNG_GAP = 12;
+/** Horizontal step between insert slots that would otherwise overlap (px). */
+const SLOT_SPREAD = 15;
 
 /** Pixel X of the left edge of grid column `col` within a rung. */
 function colX(col: number): number {
@@ -551,19 +559,34 @@ function renderRung(
     // child targets on top, so clicking a sub-element wins over its branch box.
     const walk = walkSeries(rung.series);
     if (edit.allowNestedInsert) {
-      // A nested branch's first-path slot sits at the same x/row as the parent
-      // series' slot beside that branch. Draw deepest series LAST so the
-      // innermost slot lands on top and wins the click (insert *inside* the
-      // branch, not next to it). `walkSeries` yields inner series first, so sort
-      // by depth ascending.
+      // A branch entry/exit column is shared by the parent series' slot beside
+      // the branch AND that branch's first/last path slot, so they'd overlap.
+      // Spread them: each slot steps right by its "rank" = how many *shallower*
+      // slots share the same column and vertical band. The parent (before the
+      // branch) keeps the column; each deeper (inside-branch) slot moves right,
+      // so both stay clickable. Non-overlapping slots have rank 0 (unmoved).
+      const band = (info: SeriesInfo) => {
+        const top = info.steps.length === 0 ? baseY : baseY + info.row * CELL_H;
+        const bottom = info.steps.length === 0 ? baseY + height : top + CELL_H;
+        return { top, bottom };
+      };
+      const all = walk.series.flatMap((info) => {
+        const { top, bottom } = band(info);
+        return info.slotCols.map((c) => ({ col: c, top, bottom, depth: info.steps.length }));
+      });
+      const rank = (col: number, top: number, bottom: number, depth: number) =>
+        all.filter(
+          (s) => s.col === col && s.depth < depth && s.bottom > top && s.top < bottom,
+        ).length;
       const nested = walk.series
         .filter((s) => s.steps.length > 0)
         .sort((a, b) => a.steps.length - b.steps.length);
       for (const info of nested) {
-        const y = baseY + info.row * CELL_H;
+        const top = baseY + info.row * CELL_H;
         info.slotCols.forEach((c, index) => {
+          const dx = rank(c, top, top + CELL_H, info.steps.length) * SLOT_SPREAD;
           painter.parts.push(
-            svg`<rect class="hit-slot" x=${colX(c) - 7} y=${y} width="14" height=${CELL_H}
+            svg`<rect class="hit-slot" x=${colX(c) - 7 + dx} y=${top} width="14" height=${CELL_H}
               @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,
           );
         });

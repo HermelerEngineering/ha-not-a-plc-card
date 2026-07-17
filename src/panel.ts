@@ -167,6 +167,19 @@ type Selection =
   | { kind: "el"; ni: number; ri: number; steps: SeriesStep[]; ei: number }
   | { kind: "coil"; ni: number; ri: number; ci: number };
 
+/**
+ * A readable message from a failed websocket command. HA rejects with a plain
+ * `{ code, message }` object (not an Error), which `String(err)` renders as
+ * "[object Object]" — pull the `message` out.
+ */
+function wsErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return String(err);
+}
+
 @defineOnce("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
@@ -432,7 +445,7 @@ export class NotAPlcPanel extends LitElement {
       this._status = "Saved.";
       await this._loadProgram();
     } catch (err) {
-      this._status = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      this._status = `Error: ${wsErrorMessage(err)}`;
     }
   }
 
@@ -451,7 +464,7 @@ export class NotAPlcPanel extends LitElement {
       this._status = "Saved.";
       await this._loadProgram();
     } catch (err) {
-      this._status = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      this._status = `Error: ${wsErrorMessage(err)}`;
     }
   }
 
@@ -1269,6 +1282,9 @@ export class NotAPlcPanel extends LitElement {
     if (!this._program || tool?.target !== "element") return;
     const el = tool.make() as Element;
     this._update(insertElementIn(this._program, ni, ri, steps, index, el));
+    // Place-then-configure: drop the tool and select the new element to edit it.
+    this._tool = undefined;
+    this._sel = { kind: "el", ni, ri, steps, ei: index };
   }
 
   private _placeCoil(ni: number, ri: number, index: number): void {
@@ -1276,17 +1292,33 @@ export class NotAPlcPanel extends LitElement {
     if (!this._program || tool?.target !== "coil") return;
     const output = tool.make() as Output;
     this._update(insertCoil(this._program, ni, ri, index, output));
+    this._tool = undefined;
+    this._sel = { kind: "coil", ni, ri, ci: index };
   }
 
   /**
    * Add a new OR-path to a branch. If an element tool is armed, seed the path
-   * with that element; otherwise add an empty path (fill it via its slots).
+   * with that element (then switch to select mode on it); otherwise add an empty
+   * path (fill it via its slots).
    */
   private _addBranchPath(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
     if (!this._program) return;
     const tool = this._tool;
-    const path: Element[] = tool?.target === "element" ? [tool.make() as Element] : [];
-    this._update(addBranchPath(this._program, ni, ri, steps, ei, path));
+    const branch = this._elementAt(ni, ri, steps, ei);
+    const pathIndex = branch && isBranch(branch) ? branch.branch.length : 0;
+    if (tool && tool.target === "element") {
+      this._update(addBranchPath(this._program, ni, ri, steps, ei, [tool.make() as Element]));
+      this._tool = undefined;
+      this._sel = {
+        kind: "el",
+        ni,
+        ri,
+        steps: [...steps, { index: ei, path: pathIndex }],
+        ei: 0,
+      };
+    } else {
+      this._update(addBranchPath(this._program, ni, ri, steps, ei, []));
+    }
   }
 
   private _selectEl(ni: number, ri: number, steps: SeriesStep[], ei: number): void {

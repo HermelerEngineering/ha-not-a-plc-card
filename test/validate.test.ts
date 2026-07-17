@@ -65,6 +65,13 @@ describe("validateProgram", () => {
     expect(msgs).toContain('contact references unknown tag "ghost"');
   });
 
+  it("flags an empty OR-path (rejected by the backend)", () => {
+    const p = base();
+    p.networks[0].rungs[0].series = [{ branch: [[{ type: "contact", tag: "a" }], []] }];
+    const msgs = validateProgram(p).map((i) => i.message);
+    expect(msgs).toContain("branch OR-path 2 is empty");
+  });
+
   it("warns when a rung has no output", () => {
     const p = base();
     p.networks[0].rungs[0].coils = [];

@@ -70,7 +70,10 @@ export function validateProgram(program: Program): ValidationIssue[] {
           else if (!(el.instance in fbs))
             add("error", `references unknown function block "${el.instance}"`);
         } else if (isBranch(el)) {
-          el.branch.forEach((path) => path.forEach(walkEl));
+          el.branch.forEach((path, pi) => {
+            if (path.length === 0) add("error", `branch OR-path ${pi + 1} is empty`);
+            path.forEach(walkEl);
+          });
         }
         // NOT is a leaf: nothing to reference.
       };

@@ -60,8 +60,8 @@ describe("reorderDelta", () => {
 
 describe("hitRung", () => {
   const geoms = [
-    { ri: 0, top: 0, bottom: 40, slotXs: [10, 60, 110] },
-    { ri: 1, top: 52, bottom: 92, slotXs: [10, 60] },
+    { ri: 0, top: 0, bottom: 40, slotXs: [10, 60, 110], targets: [] },
+    { ri: 1, top: 52, bottom: 92, slotXs: [10, 60], targets: [] },
   ];
   it("finds the rung under y and the nearest slot for x", () => {
     expect(hitRung(geoms, 58, 20)).toEqual({ ri: 0, index: 1 });

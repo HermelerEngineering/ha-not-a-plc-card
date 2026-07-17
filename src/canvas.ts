@@ -97,13 +97,19 @@ export interface RungGeom {
  * space, the rung the pointer is over and the nearest insertion slot in it —
  * used to drop a palette element onto the live view. Returns null when the
  * pointer is not over any rung's band.
+ *
+ * `padBottom` extends each rung's match zone downward (into the gap before the
+ * next rung). Coil drops pass the inter-rung gap here so a drop aimed at the
+ * append slot below a tall coil stack still resolves to that rung; element drops
+ * pass 0 so a drop in the gap places nothing.
  */
 export function hitRung(
   geoms: RungGeom[],
   x: number,
   y: number,
+  padBottom = 0,
 ): { ri: number; index: number } | null {
-  const g = geoms.find((r) => y >= r.top && y <= r.bottom);
+  const g = geoms.find((r) => y >= r.top && y <= r.bottom + padBottom);
   if (!g) return null;
   return { ri: g.ri, index: nearestSlot(g.slotXs, x) };
 }

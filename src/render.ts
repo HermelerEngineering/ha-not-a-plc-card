@@ -64,6 +64,8 @@ const PAD = 14;
 const TITLE_H = 22;
 const RAIL_W = 10;
 const SYMBOL_HALF = 9;
+/** Vertical gap between stacked rungs in a network. */
+export const RUNG_GAP = 12;
 
 interface Measure {
   cols: number;
@@ -585,7 +587,7 @@ export function renderNetwork(
   network.rungs.forEach((rung, ri) => {
     const r = renderRung(rung, y, flow, width, fbs, state, edit, ri);
     parts.push(r.part);
-    y += r.height + 12;
+    y += r.height + RUNG_GAP;
   });
   return { part: svg`<g>${parts}</g>`, height: y + PAD };
 }

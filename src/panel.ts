@@ -117,7 +117,7 @@ import {
 } from "./elements";
 import { RungGeom, ToolTarget, hitRung, nearestSlot, reorderDelta } from "./canvas";
 import { computePowerFlow } from "./power-flow";
-import { CanvasEdit, renderNetwork } from "./render";
+import { CanvasEdit, RUNG_GAP, renderNetwork } from "./render";
 import {
   BOOL_DOMAINS,
   REAL_DOMAINS,
@@ -1364,7 +1364,8 @@ export class NotAPlcPanel extends LitElement {
   }
 
   private _placeMove(ev: PointerEvent): void {
-    if (!this._placeTool) return;
+    const tool = this._placeTool;
+    if (!tool) return;
     if (
       Math.abs(ev.clientX - this._placeStartX) > 4 ||
       Math.abs(ev.clientY - this._placeStartY) > 4
@@ -1379,7 +1380,10 @@ export class NotAPlcPanel extends LitElement {
       return;
     }
     const { x, y } = this._toUserXY(svg, ev.clientX, ev.clientY);
-    const hit = hitRung(geoms, x, y);
+    // A coil appends below the stack, which can sit past the rung's series band,
+    // so let a coil drop reach down through the inter-rung gap.
+    const pad = tool.target === "coil" ? RUNG_GAP : 0;
+    const hit = hitRung(geoms, x, y, pad);
     const next = hit ? { ni, ri: hit.ri, index: hit.index } : undefined;
     // Only re-render when the resolved target actually changes.
     const cur = this._placeTarget;

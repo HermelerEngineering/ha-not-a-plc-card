@@ -65,4 +65,10 @@ describe("hitRung", () => {
     expect(hitRung(geoms, 30, 46)).toBeNull(); // in the 40..52 gap
     expect(hitRung(geoms, 30, 500)).toBeNull(); // below all rungs
   });
+  it("padBottom extends a rung's zone down into the gap (coil append drops)", () => {
+    // y=46 is in the gap just below rung 0; with pad it resolves to rung 0.
+    expect(hitRung(geoms, 58, 46, 12)).toEqual({ ri: 0, index: 1 });
+    // The extended zone stops at the next rung's top, so rung 1 still wins there.
+    expect(hitRung(geoms, 12, 60, 12)).toEqual({ ri: 1, index: 0 });
+  });
 });

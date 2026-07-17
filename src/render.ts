@@ -551,8 +551,15 @@ function renderRung(
     // child targets on top, so clicking a sub-element wins over its branch box.
     const walk = walkSeries(rung.series);
     if (edit.allowNestedInsert) {
-      for (const info of walk.series) {
-        if (info.steps.length === 0) continue;
+      // A nested branch's first-path slot sits at the same x/row as the parent
+      // series' slot beside that branch. Draw deepest series LAST so the
+      // innermost slot lands on top and wins the click (insert *inside* the
+      // branch, not next to it). `walkSeries` yields inner series first, so sort
+      // by depth ascending.
+      const nested = walk.series
+        .filter((s) => s.steps.length > 0)
+        .sort((a, b) => a.steps.length - b.steps.length);
+      for (const info of nested) {
         const y = baseY + info.row * CELL_H;
         info.slotCols.forEach((c, index) => {
           painter.parts.push(

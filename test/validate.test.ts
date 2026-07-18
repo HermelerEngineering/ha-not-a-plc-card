@@ -36,6 +36,21 @@ describe("validateProgram", () => {
     expect(msgs).toContain('contact references unknown tag "ghost"');
   });
 
+  it("attaches the element/coil position to each issue", () => {
+    const p = base();
+    p.networks[0].rungs[0].series = [
+      { type: "contact", tag: "a" },
+      { branch: [[{ type: "contact", tag: "ghost" }]] },
+    ];
+    p.networks[0].rungs[0].coils = [{ type: "coil", tag: "missing" }];
+    const issues = validateProgram(p);
+    const nested = issues.find((i) => i.message.includes("ghost"));
+    expect(nested).toMatchObject({ steps: [{ index: 1, path: 0 }], ei: 0 });
+    const coil = issues.find((i) => i.message.startsWith("coil"));
+    expect(coil).toMatchObject({ ci: 0 });
+    expect(coil?.steps).toBeUndefined();
+  });
+
   it("checks compare operands, allowing numbers and fb outputs", () => {
     const p = base();
     // left = REAL tag (ok), right = fb output on a known instance (ok).

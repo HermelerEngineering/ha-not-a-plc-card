@@ -10,6 +10,7 @@
  * this does not check (e.g. a compare operand must be REAL).
  */
 
+import { SeriesStep } from "./elements";
 import {
   Element,
   Output,
@@ -31,6 +32,11 @@ export interface ValidationIssue {
   /** Human-readable rung location, e.g. "n1 · r2". */
   location: string;
   message: string;
+  /** For a series-element issue: the path + index of the flagged element. */
+  steps?: SeriesStep[];
+  ei?: number;
+  /** For a coil/output issue: the output index. */
+  ci?: number;
 }
 
 export function validateProgram(program: Program): ValidationIssue[] {
@@ -53,51 +59,58 @@ export function validateProgram(program: Program): ValidationIssue[] {
   program.networks.forEach((net, ni) => {
     net.rungs.forEach((rung, ri) => {
       const location = `${net.id || `N${ni + 1}`} · ${rung.id || `R${ri + 1}`}`;
-      const add = (level: IssueLevel, message: string) =>
-        issues.push({ level, ni, ri, location, message });
+      const add = (
+        level: IssueLevel,
+        message: string,
+        pos?: { steps?: SeriesStep[]; ei?: number; ci?: number },
+      ) => issues.push({ level, ni, ri, location, message, ...pos });
 
-      const walkEl = (el: Element): void => {
+      const walkEl = (el: Element, steps: SeriesStep[], ei: number): void => {
+        const at = { steps, ei };
         if (isContact(el)) {
           const p = refProblem(el.tag);
-          if (p) add("error", `contact ${p}`);
+          if (p) add("error", `contact ${p}`, at);
         } else if (isCompare(el)) {
           const lp = refProblem(el.left);
-          if (lp) add("error", `compare left operand ${lp}`);
+          if (lp) add("error", `compare left operand ${lp}`, at);
           const rp = refProblem(el.right);
-          if (rp) add("error", `compare right operand ${rp}`);
+          if (rp) add("error", `compare right operand ${rp}`, at);
         } else if (isFb(el)) {
-          if (!el.instance) add("error", "function block not selected");
+          if (!el.instance) add("error", "function block not selected", at);
           else if (!(el.instance in fbs))
-            add("error", `references unknown function block "${el.instance}"`);
+            add("error", `references unknown function block "${el.instance}"`, at);
         } else if (isBranch(el)) {
           el.branch.forEach((path, pi) => {
-            if (path.length === 0) add("error", `branch OR-path ${pi + 1} is empty`);
-            path.forEach(walkEl);
+            if (path.length === 0) add("error", `branch OR-path ${pi + 1} is empty`, at);
+            path.forEach((sub, si) =>
+              walkEl(sub, [...steps, { index: ei, path: pi }], si),
+            );
           });
         }
         // NOT is a leaf: nothing to reference.
       };
-      rung.series.forEach(walkEl);
+      rung.series.forEach((el, ei) => walkEl(el, [], ei));
 
       if (rung.coils.length === 0) {
         add("warning", "rung has no output (coil / move / calc)");
       }
-      rung.coils.forEach((out: Output) => {
+      rung.coils.forEach((out: Output, ci) => {
+        const at = { ci };
         if (isMove(out)) {
           const dp = refProblem(out.dst);
-          if (dp) add("error", `move target ${dp}`);
+          if (dp) add("error", `move target ${dp}`, at);
           const sp = refProblem(out.src);
-          if (sp) add("error", `move source ${sp}`);
+          if (sp) add("error", `move source ${sp}`, at);
         } else if (isCalc(out)) {
           const dp = refProblem(out.dst);
-          if (dp) add("error", `calc target ${dp}`);
+          if (dp) add("error", `calc target ${dp}`, at);
           const ap = refProblem(out.a);
-          if (ap) add("error", `calc operand A ${ap}`);
+          if (ap) add("error", `calc operand A ${ap}`, at);
           const bp = refProblem(out.b);
-          if (bp) add("error", `calc operand B ${bp}`);
+          if (bp) add("error", `calc operand B ${bp}`, at);
         } else {
           const p = refProblem(out.tag);
-          if (p) add("error", `coil ${p}`);
+          if (p) add("error", `coil ${p}`, at);
         }
       });
     });

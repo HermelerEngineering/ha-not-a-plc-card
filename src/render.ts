@@ -372,6 +372,10 @@ export interface CanvasEdit {
    * top level only, so nested slots would be misleading.
    */
   allowNestedInsert?: boolean;
+  /** Series-element positions flagged by validation, tinted red. */
+  errorEls?: { ri: number; steps: SeriesStep[]; ei: number }[];
+  /** Coil/output positions flagged by validation, tinted red. */
+  errorCoils?: { ri: number; ci: number }[];
   onInsertElement: (ri: number, steps: SeriesStep[], index: number) => void;
   /** Select an element for the inspector (steps = [] for a top-level element). */
   onSelectElement: (ri: number, steps: SeriesStep[], ei: number) => void;
@@ -632,6 +636,35 @@ function renderRung(
     // so here we descend into branches only. Parent-before-child walk order puts
     // child targets on top, so clicking a sub-element wins over its branch box.
     const walk = walkSeries(rung.series);
+
+    // Validation error tints: a translucent red rect behind each flagged element
+    // or output (drawn among the overlay, pointer-transparent so it never blocks
+    // a click; the symbol underneath still shows through).
+    if (edit.errorEls?.length) {
+      for (const cell of walk.cells) {
+        const flagged = edit.errorEls.some(
+          (e) => e.ri === ri && e.ei === cell.ei && sameSteps(e.steps, cell.steps),
+        );
+        if (!flagged) continue;
+        const x = colX(cell.col);
+        painter.parts.push(
+          svg`<rect class="err-cell" x=${x} y=${baseY + cell.row * CELL_H}
+            width=${colX(cell.col + cell.cols) - x} height=${cell.rows * CELL_H} />`,
+        );
+      }
+    }
+    if (edit.errorCoils?.length) {
+      rung.coils.forEach((coil, ci) => {
+        if (!edit.errorCoils!.some((e) => e.ri === ri && e.ci === ci)) return;
+        const cy = coilTaps[ci];
+        const w = isMove(coil) || isCalc(coil) ? OUTPUT_BLOCK_SPACE : CELL_W;
+        painter.parts.push(
+          svg`<rect class="err-cell" x=${coilX} y=${cy - CELL_H / 2}
+            width=${w} height=${outputRows(coil) * CELL_H} />`,
+        );
+      });
+    }
+
     if (edit.allowNestedInsert) {
       // A branch entry/exit column is shared by the parent series' slot beside
       // the branch AND that branch's first/last path slot, so they'd overlap.

@@ -332,6 +332,25 @@ export function newBranch(): BranchEl {
 }
 
 /**
+ * Replace the element at (steps, ei) with an OR branch whose first path contains
+ * that element — "wrap the selection in an OR branch". The user then adds parallel
+ * paths (via the branch editor's "+ path"). A branch is left unchanged (wrapping a
+ * branch in a branch is not useful); the resulting single-path branch is valid
+ * (each path is non-empty).
+ */
+export function wrapInBranch(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+): Program {
+  return editSeriesAt(program, ni, ri, steps, (s) =>
+    mapAt(s, ei, (el) => (isBranch(el) ? el : { branch: [[el]] })),
+  );
+}
+
+/**
  * Append an OR-path (default empty) to the branch element at `ei` in the series
  * addressed by `steps`. A no-op if that element is not a branch.
  */

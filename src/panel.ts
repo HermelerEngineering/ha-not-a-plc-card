@@ -115,6 +115,7 @@ import {
   setRungTitle,
   updateCoil,
   updateElementIn,
+  wrapInBranch,
 } from "./elements";
 import {
   RungGeom,
@@ -1007,11 +1008,22 @@ export class NotAPlcPanel extends LitElement {
     steps: SeriesStep[],
     ei: number,
   ): TemplateResult {
+    const el = this._elementAt(ni, ri, steps, ei);
+    const canWrap = el !== undefined && !isBranch(el);
     return html`
       ${this._moveButtons(
         () => this._edit((p) => moveElementIn(p, ni, ri, steps, ei, -1)),
         () => this._edit((p) => moveElementIn(p, ni, ri, steps, ei, 1)),
       )}
+      ${canWrap
+        ? html`<button
+            class="chip"
+            title="Wrap this element in an OR branch"
+            @click=${() => this._wrapInOr(ni, ri, steps, ei)}
+          >
+            Wrap OR
+          </button>`
+        : ""}
       <button
         class="icon"
         title="Delete element"
@@ -1020,6 +1032,12 @@ export class NotAPlcPanel extends LitElement {
         ✕
       </button>
     `;
+  }
+
+  /** Wrap the element at (steps, ei) in an OR branch; keep it selected. */
+  private _wrapInOr(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
+    this._edit((p) => wrapInBranch(p, ni, ri, steps, ei));
+    this._sel = { kind: "el", ni, ri, steps, ei };
   }
 
   private _removeBranchPath(
@@ -1562,6 +1580,15 @@ export class NotAPlcPanel extends LitElement {
     if (this._placeTool?.target === "element" && pt && pt.ni === ni) {
       placeDrop = { ri: pt.ri, steps: pt.steps, index: pt.index };
     }
+    // Positions flagged by validation (this network only), to tint red on the view.
+    const issues = this._program ? validateProgram(this._program) : [];
+    const netErrors = issues.filter((i) => i.level === "error" && i.ni === ni);
+    const errorEls = netErrors
+      .filter((i) => i.steps !== undefined && i.ei !== undefined)
+      .map((i) => ({ ri: i.ri, steps: i.steps!, ei: i.ei! }));
+    const errorCoils = netErrors
+      .filter((i) => i.ci !== undefined)
+      .map((i) => ({ ri: i.ri, ci: i.ci! }));
     return {
       ni,
       // While dragging a palette tool, arm its target so the insert slots show
@@ -1573,6 +1600,8 @@ export class NotAPlcPanel extends LitElement {
           ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
           : null,
       placeDrop,
+      errorEls,
+      errorCoils,
       // Show nested insert slots for a persistently armed element tool, or while
       // dragging an element in from the palette (so it can land inside a branch).
       allowNestedInsert:
@@ -2121,9 +2150,8 @@ export class NotAPlcPanel extends LitElement {
       color: var(--text-primary-color, #fff);
       outline: 2px solid var(--primary-color);
     }
-    button.chip.draggable {
-      cursor: grab;
-      touch-action: none;
+    /* All palette buttons (the draggable tools and Select) are the same square. */
+    .palette button.chip {
       width: 46px;
       height: 46px;
       padding: 0;
@@ -2131,6 +2159,10 @@ export class NotAPlcPanel extends LitElement {
       align-items: center;
       justify-content: center;
       font-size: 13px;
+    }
+    button.chip.draggable {
+      cursor: grab;
+      touch-action: none;
     }
     button.chip.dragging {
       cursor: grabbing;
@@ -2217,6 +2249,10 @@ export class NotAPlcPanel extends LitElement {
       fill: none;
       stroke: var(--primary-color);
       stroke-width: 1.5;
+    }
+    .cv-svg .err-cell {
+      fill: color-mix(in srgb, var(--error-color, #c62828) 22%, transparent);
+      pointer-events: none;
     }
     .modal-backdrop {
       position: fixed;

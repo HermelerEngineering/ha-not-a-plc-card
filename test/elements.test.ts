@@ -30,7 +30,9 @@ import {
   updateCoil,
   updateElement,
   updateElementIn,
+  wrapInBranch,
 } from "../src/elements";
+import { isBranch } from "../src/ir";
 
 function prog(): Program {
   return {
@@ -53,6 +55,36 @@ function prog(): Program {
     ],
   };
 }
+
+describe("wrapInBranch", () => {
+  it("replaces the element with an OR branch whose first path holds it", () => {
+    const p = wrapInBranch(prog(), 0, 0, [], 0);
+    const el = p.networks[0].rungs[0].series[0];
+    expect(isBranch(el)).toBe(true);
+    if (isBranch(el)) {
+      expect(el.branch).toHaveLength(1);
+      expect(el.branch[0]).toEqual([newContact("a")]);
+    }
+  });
+
+  it("leaves a branch unchanged (no branch-in-branch)", () => {
+    const withBranch = updateElement(prog(), 0, 0, 0, newBranch());
+    const p = wrapInBranch(withBranch, 0, 0, [], 0);
+    expect(p.networks[0].rungs[0].series[0]).toEqual(newBranch());
+  });
+
+  it("wraps an element nested inside a branch path", () => {
+    // a → branch[[c]] ; wrap the inner contact c.
+    let p = updateElement(prog(), 0, 0, 0, { branch: [[newContact("c")]] });
+    p = wrapInBranch(p, 0, 0, [{ index: 0, path: 0 }], 0);
+    const outer = p.networks[0].rungs[0].series[0];
+    if (isBranch(outer)) {
+      const inner = outer.branch[0][0];
+      expect(isBranch(inner)).toBe(true);
+      if (isBranch(inner)) expect(inner.branch[0]).toEqual([newContact("c")]);
+    }
+  });
+});
 
 describe("freshId", () => {
   it("returns a prefixed id that avoids collisions", () => {

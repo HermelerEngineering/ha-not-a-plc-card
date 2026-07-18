@@ -1631,26 +1631,101 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
+  /**
+   * The parameter editor for the selected element/coil, shown as a modal popup
+   * over the canvas. For a function-block element it also embeds the referenced
+   * instance's parameters (type + preset/PV/reset/…) so they can be changed here
+   * without going to the separate "Function blocks" section.
+   */
   private _renderInspector(): TemplateResult {
     if (!this._sel || !this._program) return html``;
+    let title: string;
+    let body: TemplateResult;
     if (this._sel.kind === "el") {
       const { ni, ri, steps, ei } = this._sel;
       const el = this._elementAt(ni, ri, steps, ei);
       if (!el) return html``;
-      return html`
-        <div class="inspector">
-          <div class="col-label">Selected element</div>
-          ${this._renderSeriesElement(el, ni, ri, steps, ei)}
-        </div>
+      title = this._elementTitle(el);
+      body = html`
+        ${this._renderSeriesElement(el, ni, ri, steps, ei)}
+        ${isFb(el) ? this._renderFbInstancePanel((el as FbRefEl).instance) : ""}
       `;
+    } else {
+      const { ni, ri, ci } = this._sel;
+      const coil = this._program.networks[ni]?.rungs[ri]?.coils[ci];
+      if (!coil) return html``;
+      title = this._coilTitle(coil);
+      body = this._renderCoilEditor(coil, ni, ri, ci);
     }
-    const { ni, ri, ci } = this._sel;
-    const coil = this._program.networks[ni]?.rungs[ri]?.coils[ci];
-    if (!coil) return html``;
     return html`
-      <div class="inspector">
-        <div class="col-label">Selected coil</div>
-        ${this._renderCoilEditor(coil, ni, ri, ci)}
+      <div class="modal-backdrop" @click=${() => this._closeInspector()}>
+        <div
+          class="modal"
+          role="dialog"
+          aria-label=${title}
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="modal-head">
+            <span class="modal-title">${title}</span>
+            <span class="spacer"></span>
+            <button class="icon" title="Close" @click=${() => this._closeInspector()}>
+              ✕
+            </button>
+          </div>
+          <div class="modal-body">${body}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  private _closeInspector(): void {
+    this._sel = undefined;
+  }
+
+  private _elementTitle(el: Element): string {
+    if (isContact(el)) return "Contact";
+    if (isCompare(el)) return "Compare";
+    if (isFb(el)) return `Function block: ${(el as FbRefEl).instance}`;
+    if (isNot(el)) return "NOT (inverter)";
+    if (isBranch(el)) return "Branch (OR)";
+    return "Element";
+  }
+
+  private _coilTitle(output: Output): string {
+    if (isMove(output)) return "Move ( := )";
+    if (isCalc(output)) return "Calc";
+    return "Coil";
+  }
+
+  /** Type + parameter editor for the fb instance an `fb` element references. */
+  private _renderFbInstancePanel(name: string): TemplateResult {
+    const def = this._program?.fbs?.[name];
+    if (!def) return html``;
+    const fields = fbFields(def.type);
+    return html`
+      <div class="modal-section">
+        <div class="col-label">Block parameters</div>
+        <div class="fb-row">
+          <label class="fb-param">
+            type
+            <select
+              .value=${def.type}
+              @change=${(e: Event) =>
+                this._edit((p) =>
+                  setFbType(p, name, (e.target as HTMLSelectElement).value),
+                )}
+            >
+              ${FB_TYPES.map(
+                (t) =>
+                  html`<option value=${t} ?selected=${t === def.type}>${t}</option>`,
+              )}
+            </select>
+          </label>
+          ${fields.map((field) => this._renderFbParam(name, def, field))}
+        </div>
+        ${fields.length === 0
+          ? html`<div class="muted">This block type has no parameters.</div>`
+          : ""}
       </div>
     `;
   }
@@ -2122,12 +2197,45 @@ export class NotAPlcPanel extends LitElement {
       stroke: var(--primary-color);
       stroke-width: 1.5;
     }
-    .inspector {
-      margin-top: 10px;
-      padding: 8px 10px;
-      border: 1px solid var(--primary-color);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    .modal {
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 10px;
+      min-width: 320px;
+      max-width: min(560px, 92vw);
+      max-height: 85vh;
+      overflow: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider-color, #eee);
+      position: sticky;
+      top: 0;
+      background: var(--card-background-color, #fff);
+    }
+    .modal-title {
+      font-weight: 500;
+    }
+    .modal-body {
+      padding: 12px 14px;
+    }
+    .modal-section {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--divider-color, #eee);
     }
     .validation {
       margin-bottom: 10px;

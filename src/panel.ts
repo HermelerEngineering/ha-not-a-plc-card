@@ -857,8 +857,8 @@ export class NotAPlcPanel extends LitElement {
 
   private _moveButtons(up: () => void, down: () => void): TemplateResult {
     return html`
-      <button class="icon" title="Move up" @click=${up}>↑</button>
-      <button class="icon" title="Move down" @click=${down}>↓</button>
+      <button class="icon neutral" title="Move up" @click=${up}>↑</button>
+      <button class="icon neutral" title="Move down" @click=${down}>↓</button>
     `;
   }
 
@@ -1668,7 +1668,11 @@ export class NotAPlcPanel extends LitElement {
           <div class="modal-head">
             <span class="modal-title">${title}</span>
             <span class="spacer"></span>
-            <button class="icon" title="Close" @click=${() => this._closeInspector()}>
+            <button
+              class="icon neutral"
+              title="Close"
+              @click=${() => this._closeInspector()}
+            >
               ✕
             </button>
           </div>
@@ -1903,14 +1907,24 @@ export class NotAPlcPanel extends LitElement {
       background: var(--secondary-background-color, #e0e0e0);
       color: var(--primary-text-color);
     }
+    /* Icon buttons are destructive (delete/remove) by default, so they read red
+       to distinguish them from neutral actions like the modal close or reorder. */
     button.icon {
       background: none;
-      color: var(--secondary-text-color);
+      color: var(--error-color, #db4437);
       padding: 4px 8px;
       font-size: 1em;
     }
     button.icon:hover {
       color: var(--error-color, #db4437);
+      opacity: 0.75;
+    }
+    button.icon.neutral {
+      color: var(--secondary-text-color);
+    }
+    button.icon.neutral:hover {
+      color: var(--primary-text-color);
+      opacity: 1;
     }
     button.small {
       padding: 4px 10px;
@@ -2110,6 +2124,13 @@ export class NotAPlcPanel extends LitElement {
     button.chip.draggable {
       cursor: grab;
       touch-action: none;
+      width: 46px;
+      height: 46px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
     }
     button.chip.dragging {
       cursor: grabbing;

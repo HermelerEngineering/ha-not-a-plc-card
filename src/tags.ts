@@ -90,13 +90,32 @@ export function defaultRealWrite(entityId: string): {
 }
 
 /**
- * Infer a tag type from a bound entity_id's domain: numeric domains map to
- * REAL, everything else to BOOL. The result is a sensible default the user can
- * still override. (A non-numeric `sensor` is rare here and is easily corrected.)
+ * Domains whose *state* is boolean but which expose interesting *numeric* data
+ * only via an attribute (a light's `brightness`, a cover's `position`, …). For
+ * these the type is genuinely ambiguous — it depends on whether the tag reads
+ * the state (BOOL) or an attribute (REAL) — so binding one must NOT override a
+ * type the user already chose.
  */
-export function inferType(entityId: string): TagType {
+export const AMBIGUOUS_DOMAINS = [
+  "light",
+  "fan",
+  "cover",
+  "climate",
+  "media_player",
+  "valve",
+];
+
+/**
+ * Infer a tag type from a bound entity_id's domain: numeric domains map to
+ * REAL, clearly-boolean domains to BOOL. Returns `null` for an ambiguous domain
+ * (see `AMBIGUOUS_DOMAINS`) so the caller keeps the user's current type instead
+ * of forcing one. The result is a sensible default the user can still override.
+ */
+export function inferType(entityId: string): TagType | null {
   const domain = entityId.split(".")[0];
-  return REAL_DOMAINS.includes(domain) ? "REAL" : "BOOL";
+  if (REAL_DOMAINS.includes(domain)) return "REAL";
+  if (AMBIGUOUS_DOMAINS.includes(domain)) return null;
+  return "BOOL";
 }
 
 /** Fields on a tag that only make sense for a specific kind. */

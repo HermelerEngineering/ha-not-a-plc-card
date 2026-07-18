@@ -132,7 +132,6 @@ import {
   WRITE_DOMAINS,
   addTag,
   defaultRealWrite,
-  domainsForType,
   inferType,
   isTagReferenced,
   removeTag,
@@ -343,7 +342,9 @@ export class NotAPlcPanel extends LitElement {
     if (!this._program) return;
     const tag = this._program.tags[name];
     // Binding an input entity infers the tag type from its domain (overridable).
-    const type = value ? inferType(value) : tag.type;
+    // An ambiguous domain (light/cover/…) returns null → keep the current type,
+    // so picking e.g. a light for a REAL tag reading `brightness` stays REAL.
+    const type = (value ? inferType(value) : null) ?? tag.type;
     this._update(
       setTag(this._program, name, { ...tag, source: value || undefined, type }),
     );
@@ -631,10 +632,10 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
-  private _entityIds(domains: string[]): string[] {
+  private _entityIds(domains: string[] | null): string[] {
     const states = this.hass?.states ?? {};
     return Object.keys(states)
-      .filter((id) => domains.includes(id.split(".")[0]))
+      .filter((id) => domains === null || domains.includes(id.split(".")[0]))
       .sort();
   }
 
@@ -652,6 +653,9 @@ export class NotAPlcPanel extends LitElement {
       <datalist id="np-real-entities">${options(REAL_DOMAINS)}</datalist>
       <datalist id="np-bool-entities">${options(BOOL_DOMAINS)}</datalist>
       <datalist id="np-write-entities">${options(WRITE_DOMAINS)}</datalist>
+      <datalist id="np-all-entities">
+        ${this._entityIds(null).map((id) => html`<option value=${id}></option>`)}
+      </datalist>
     `;
   }
 
@@ -660,17 +664,19 @@ export class NotAPlcPanel extends LitElement {
     domains: string[],
     placeholder: string,
     onChange: (v: string) => void,
+    listId?: string,
   ): TemplateResult {
-    const listId =
-      domains === REAL_DOMAINS
+    const resolvedList =
+      listId ??
+      (domains === REAL_DOMAINS
         ? "np-real-entities"
         : domains === WRITE_DOMAINS
           ? "np-write-entities"
-          : "np-bool-entities";
+          : "np-bool-entities");
     return html`
       <input
         class="entity-input"
-        list=${listId}
+        list=${resolvedList}
         .value=${value}
         placeholder=${placeholder}
         @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
@@ -683,9 +689,10 @@ export class NotAPlcPanel extends LitElement {
       return html`
         ${this._entityPicker(
           tag.source ?? "",
-          domainsForType(tag.type ?? "BOOL"),
+          [],
           "entity_id",
           (v) => this._setSource(name, v),
+          "np-all-entities",
         )}
         <input
           class="attr-input"

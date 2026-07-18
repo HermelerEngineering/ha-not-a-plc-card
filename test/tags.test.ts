@@ -14,14 +14,21 @@ import {
 } from "../src/tags";
 
 describe("inferType", () => {
-  it("maps numeric domains to REAL and the rest to BOOL", () => {
+  it("maps numeric domains to REAL and clearly-boolean domains to BOOL", () => {
     expect(inferType("sensor.temperature")).toBe("REAL");
     expect(inferType("input_number.setpoint")).toBe("REAL");
     expect(inferType("number.x")).toBe("REAL");
     expect(inferType("binary_sensor.motion")).toBe("BOOL");
     expect(inferType("input_boolean.flag")).toBe("BOOL");
     expect(inferType("switch.pump")).toBe("BOOL");
-    expect(inferType("light.hall")).toBe("BOOL");
+  });
+
+  it("returns null for ambiguous domains so the chosen type is kept", () => {
+    // A light's numeric data (brightness) lives in an attribute, so binding one
+    // must not force BOOL over a REAL tag the user set up to read that attribute.
+    expect(inferType("light.hall")).toBeNull();
+    expect(inferType("cover.garage")).toBeNull();
+    expect(inferType("climate.living")).toBeNull();
   });
 });
 

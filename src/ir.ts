@@ -90,8 +90,16 @@ export interface CalcEl {
   b: number | string;
 }
 
-/** A rung output: a boolean coil, a REAL move, or a REAL calc. */
-export type Output = Coil | MoveEl | CalcEl;
+export interface ActionEl {
+  type: "action";
+  /** The `domain.service` to call on the rung's rising edge. */
+  service: string;
+  /** Static service-call data (e.g. `{ entity_id, option }`). */
+  data: Record<string, unknown>;
+}
+
+/** A rung output: a boolean coil, a REAL move/calc, or a service call. */
+export type Output = Coil | MoveEl | CalcEl | ActionEl;
 
 export interface Rung {
   id: string;
@@ -156,4 +164,8 @@ export function isMove(output: Output): output is MoveEl {
 
 export function isCalc(output: Output): output is CalcEl {
   return (output as CalcEl).type === "calc";
+}
+
+export function isAction(output: Output): output is ActionEl {
+  return (output as ActionEl).type === "action";
 }

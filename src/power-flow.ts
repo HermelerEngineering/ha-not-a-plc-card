@@ -24,6 +24,7 @@ import {
   Program,
   Rung,
   StateImage,
+  isAction,
   isBranch,
   isCalc,
   isCompare,
@@ -174,9 +175,12 @@ export function computePowerFlow(program: Program, state: StateImage): PowerFlow
       const result = flowSeries(rung.series, state, true, elements);
       rungs.set(rung, { result });
       for (const output of rung.coils) {
-        // A move/calc has no stored bool; it is energised with the rung result.
+        // A move/calc/action has no stored bool; it is energised with the rung
+        // result (an action's box just reflects when the rung fires it).
         const value =
-          isMove(output) || isCalc(output) ? false : truthy(state[output.tag]);
+          isMove(output) || isCalc(output) || isAction(output)
+            ? false
+            : truthy(state[output.tag]);
         coils.set(output, { energised: result, value });
       }
     }

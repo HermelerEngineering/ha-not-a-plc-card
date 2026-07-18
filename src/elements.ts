@@ -13,6 +13,7 @@
  */
 
 import {
+  ActionEl,
   BranchEl,
   CalcEl,
   CalcOp,
@@ -88,6 +89,10 @@ export function newMove(dst = "", src: number | string = 0): MoveEl {
 
 export function newCalc(op: CalcOp = "ADD"): CalcEl {
   return { type: "calc", op, dst: "", a: 0, b: 0 };
+}
+
+export function newAction(): ActionEl {
+  return { type: "action", service: "", data: {} };
 }
 
 export function newRung(id: string): Rung {

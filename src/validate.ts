@@ -15,6 +15,7 @@ import {
   Element,
   Output,
   Program,
+  isAction,
   isBranch,
   isCalc,
   isCompare,
@@ -96,7 +97,11 @@ export function validateProgram(program: Program): ValidationIssue[] {
       }
       rung.coils.forEach((out: Output, ci) => {
         const at = { ci };
-        if (isMove(out)) {
+        if (isAction(out)) {
+          if (!out.service || !out.service.includes(".")) {
+            add("error", "service call needs a domain.service", at);
+          }
+        } else if (isMove(out)) {
           const dp = refProblem(out.dst);
           if (dp) add("error", `move target ${dp}`, at);
           const sp = refProblem(out.src);

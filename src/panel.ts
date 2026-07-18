@@ -51,6 +51,7 @@ import {
   CoilMode,
   CompareEl,
   CompareOp,
+  ActionEl,
   ContactEl,
   ContactMode,
   Element,
@@ -68,6 +69,7 @@ import {
   TagDef,
   TagKind,
   TagType,
+  isAction,
   isBranch,
   isCalc,
   isCompare,
@@ -100,6 +102,7 @@ import {
   moveElementIn,
   moveNetwork,
   moveRung,
+  newAction,
   newBranch,
   newCalc,
   newCoil,
@@ -978,6 +981,12 @@ export class NotAPlcPanel extends LitElement {
               >
                 + Calc
               </button>
+              <button
+                class="chip"
+                @click=${() => this._edit((p) => addCoil(p, ni, ri, newAction()))}
+              >
+                + Service
+              </button>
             </div>
           </div>
         </div>
@@ -1284,6 +1293,44 @@ export class NotAPlcPanel extends LitElement {
       `;
     }
 
+    if (isAction(output)) {
+      const set = (next: ActionEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
+      const setData = (raw: string) => {
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            set({ ...output, data: parsed as Record<string, unknown> });
+          }
+        } catch {
+          /* keep the previous data until valid JSON is entered */
+        }
+      };
+      return html`
+        <div class="el-row">
+          <span class="el-type">do</span>
+          <input
+            class="right-input"
+            .value=${output.service}
+            placeholder="domain.service"
+            title="e.g. scene.turn_on, select.select_option, climate.set_preset_mode"
+            @change=${(e: Event) =>
+              set({
+                ...output,
+                service: (e.target as HTMLInputElement).value.trim(),
+              })}
+          />
+          <input
+            class="action-data"
+            .value=${JSON.stringify(output.data)}
+            placeholder='{"entity_id":"scene.movie"}'
+            title="Static service data (JSON): target entity, option, preset, …"
+            @change=${(e: Event) => setData((e.target as HTMLInputElement).value)}
+          />
+          ${del}
+        </div>
+      `;
+    }
+
     const coil = output;
     const set = (next: Coil) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
     return html`
@@ -1324,6 +1371,7 @@ export class NotAPlcPanel extends LitElement {
         target: "coil" as ToolTarget,
         make: () => newCalc(op),
       })),
+      { label: "do", target: "coil", make: () => newAction() },
     ];
     const fb = this._fbNames()[0];
     if (fb) {
@@ -1838,6 +1886,7 @@ export class NotAPlcPanel extends LitElement {
   private _coilTitle(output: Output): string {
     if (isMove(output)) return "Move ( := )";
     if (isCalc(output)) return "Calc";
+    if (isAction(output)) return "Service call";
     return "Coil";
   }
 
@@ -2161,6 +2210,12 @@ export class NotAPlcPanel extends LitElement {
     }
     .right-input {
       width: 90px;
+    }
+    .action-data {
+      flex: 1;
+      min-width: 180px;
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.85em;
     }
     .add-row {
       display: flex;

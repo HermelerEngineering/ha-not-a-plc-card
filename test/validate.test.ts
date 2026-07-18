@@ -108,4 +108,18 @@ describe("validateProgram", () => {
     // The valid move produces no message.
     expect(msgs.some((m) => m.startsWith("move"))).toBe(false);
   });
+
+  it("flags a service call without a domain.service", () => {
+    const p = base();
+    p.networks[0].rungs[0].coils = [
+      { type: "action", service: "", data: {} },
+      { type: "action", service: "scene.turn_on", data: {} },
+    ];
+    const issues = validateProgram(p);
+    const msgs = issues.map((i) => i.message);
+    expect(msgs).toContain("service call needs a domain.service");
+    // A valid service call produces no message and is attached to its coil index.
+    expect(issues.filter((i) => i.message.includes("service call"))).toHaveLength(1);
+    expect(issues.find((i) => i.message.includes("service call"))?.ci).toBe(0);
+  });
 });

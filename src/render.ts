@@ -28,6 +28,7 @@ import {
   Output,
   Rung,
   StateImage,
+  isAction,
   isBranch,
   isCalc,
   isCompare,
@@ -443,7 +444,9 @@ function renderRung(
   // Wire from the last element to the coils on the right, then the coils. A
   // move/calc output draws a wider TIA-style box, so reserve more room on the
   // right for those rungs.
-  const hasOutputBlock = rung.coils.some((o) => isMove(o) || isCalc(o));
+  const hasOutputBlock = rung.coils.some(
+    (o) => isMove(o) || isCalc(o) || isAction(o),
+  );
   const rightSpace = hasOutputBlock ? OUTPUT_BLOCK_SPACE : 120;
   const coilX = Math.max(colX(res.endCol) + 24, width - rightSpace);
   painter.parts.push(
@@ -463,6 +466,31 @@ function renderRung(
     // Sit the output about half a cell right of the bus, so the stub matches the
     // spacing used between a branch bus and its parallel contacts.
     const cx = coilX + CELL_W / 2;
+
+    if (isAction(output)) {
+      // A service-call output: a box labelled with the service it fires, coloured
+      // by whether its rung is energised (it fires on the rising edge). The target
+      // entity, if any, is shown below.
+      const cls = energised ? "symbol live" : "symbol";
+      const boxW = 150;
+      const boxLeft = coilX + 16;
+      const boxCx = boxLeft + boxW / 2;
+      painter.parts.push(
+        svg`<line x1=${coilX} y1=${cy} x2=${boxLeft} y2=${cy} class=${wireClass(energised)} />`,
+      );
+      painter.parts.push(
+        svg`<rect x=${boxLeft} y=${cy - 14} width=${boxW} height="28" rx="3" class=${cls} fill="none" />`,
+      );
+      painter.parts.push(svg`<text x=${boxCx} y=${cy - 18} class="mode">do</text>`);
+      painter.parts.push(
+        svg`<text x=${boxCx} y=${cy + 4} class="fb-text">${output.service || "?"}</text>`,
+      );
+      const target = output.data?.entity_id;
+      if (typeof target === "string" && target) {
+        painter.parts.push(svg`<text x=${boxCx} y=${cy + 25} class="tag">${target}</text>`);
+      }
+      return;
+    }
 
     if (isMove(output) || isCalc(output)) {
       // TIA-style output box aligned like a function block: the enable (rung
@@ -596,7 +624,7 @@ function renderRung(
       const cy = coilTaps[i];
       // A move/calc draws a wider, taller box than a simple coil; widen and
       // heighten its hit-target so the whole block (and its labels) is clickable.
-      const isBlock = isMove(coil) || isCalc(coil);
+      const isBlock = isMove(coil) || isCalc(coil) || isAction(coil);
       const hitW = isBlock ? OUTPUT_BLOCK_SPACE : CELL_W;
       const hitH = outputRows(coil) * CELL_H;
       const sel =

@@ -20,6 +20,7 @@ import {
   TagDef,
   TagKind,
   TagType,
+  isAction,
   isBranch,
   isCalc,
   isCompare,
@@ -135,6 +136,7 @@ export function isTagReferenced(program: Program, name: string): boolean {
       const inOutput = rung.coils.some((c) => {
         if (isMove(c)) return c.dst === name || c.src === name;
         if (isCalc(c)) return c.dst === name || c.a === name || c.b === name;
+        if (isAction(c)) return false; // a service call references no tag
         return c.tag === name;
       });
       if (inOutput) return true;
@@ -209,6 +211,7 @@ export function renameTag(program: Program, oldName: string, newName: string): P
           if (next.b === oldName) next.b = newName;
           return next;
         }
+        if (isAction(c)) return c; // no tag reference
         return c.tag === oldName ? { ...c, tag: newName } : c;
       }),
     })),

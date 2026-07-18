@@ -1,6 +1,6 @@
 {
   "name": "ha-not-a-plc-card",
-  "version": "0.24.3",
+  "version": "0.25.0",
   "description": "Read-only Lovelace card that shows a Not-a-PLC ladder program flowing live.",
   "type": "module",
   "license": "MIT",

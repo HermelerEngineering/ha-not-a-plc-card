@@ -362,14 +362,14 @@ export interface CanvasEdit {
   selected?:
     | { kind: "el"; ni: number; ri: number; steps: SeriesStep[]; ei: number }
     | { kind: "coil"; ni: number; ri: number; ci: number };
-  /** The in-progress top-level element drag in this network, or null. */
-  drag?: { ri: number; ei: number; drop: number } | null;
-  /** Which insertion slot a palette element being dragged in would drop into. */
+  /** The element being drag-reordered in this network (dimmed as a ghost), or null. */
+  dragSource?: { ri: number; steps: SeriesStep[]; ei: number } | null;
+  /** Which insertion slot a dragged element (palette or reorder) would drop into. */
   placeDrop?: { ri: number; steps: SeriesStep[]; index: number } | null;
   /**
-   * Show insertion slots *inside* branches. True only for a persistently armed
-   * element tool (click-to-place), not a palette drag — a drag resolves to the
-   * top level only, so nested slots would be misleading.
+   * Show insertion slots *inside* branches (for a persistently armed element tool,
+   * a palette element drag, or a reorder drag). The nested slot *geometry* is always
+   * reported via `onGeometry` regardless, so a drag can hit-test into a branch.
    */
   allowNestedInsert?: boolean;
   /** Series-element positions flagged by validation, tinted red. */
@@ -389,10 +389,16 @@ export interface CanvasEdit {
     geom: { top: number; bottom: number; slotXs: number[]; targets: SlotTarget[] },
   ) => void;
   /**
-   * A pointer went down on a top-level element hit-target. The panel decides
-   * whether it becomes a drag (moved) or a select (released in place).
+   * A pointer went down on an element hit-target (`steps` = [] for a top-level
+   * element, or the branch path for a nested one). The panel decides whether it
+   * becomes a drag (moved) or a select (released in place).
    */
-  onElementPointerDown?: (ri: number, ei: number, ev: PointerEvent) => void;
+  onElementPointerDown?: (
+    ri: number,
+    steps: SeriesStep[],
+    ei: number,
+    ev: PointerEvent,
+  ) => void;
 }
 
 function renderRung(
@@ -570,13 +576,11 @@ function renderRung(
       slot(col, ei);
       const w = measureElement(el).cols;
       if (edit.armed === null) {
-        const dragging =
-          edit.drag != null && edit.drag.ri === ri && edit.drag.ei === ei;
         painter.parts.push(
-          svg`<rect class="hit-el drag-el ${selEl(ei) ? "sel" : ""} ${dragging ? "dragging" : ""}"
+          svg`<rect class="hit-el drag-el ${selEl(ei) ? "sel" : ""}"
             x=${colX(col)} y=${baseY}
             width=${colX(col + w) - colX(col)} height=${height}
-            @pointerdown=${(ev: PointerEvent) => edit.onElementPointerDown?.(ri, ei, ev)} />`,
+            @pointerdown=${(ev: PointerEvent) => edit.onElementPointerDown?.(ri, [], ei, ev)} />`,
         );
       } else if (selEl(ei)) {
         painter.parts.push(
@@ -587,17 +591,6 @@ function renderRung(
       col += w;
     });
     slot(col, rung.series.length);
-
-    // Drop indicator for an in-progress *reorder* (a palette drop instead
-    // highlights its target slot via the `targeted` class).
-    if (edit.drag != null && edit.drag.ri === ri) {
-      const dx = slotXs[edit.drag.drop];
-      if (dx !== undefined) {
-        painter.parts.push(
-          svg`<line class="drop-indicator" x1=${dx} y1=${baseY} x2=${dx} y2=${baseY + height} />`,
-        );
-      }
-    }
 
     rung.coils.forEach((coil, i) => {
       const cy = coilTaps[i];
@@ -665,13 +658,15 @@ function renderRung(
       });
     }
 
-    if (edit.allowNestedInsert) {
-      // A branch entry/exit column is shared by the parent series' slot beside
-      // the branch AND that branch's first/last path slot, so they'd overlap.
-      // Spread them: each slot steps right by its "rank" = how many *shallower*
-      // slots share the same column and vertical band. The parent (before the
-      // branch) keeps the column; each deeper (inside-branch) slot moves right,
-      // so both stay clickable. Non-overlapping slots have rank 0 (unmoved).
+    // Nested insertion slots. A branch entry/exit column is shared by the parent
+    // series' slot beside the branch AND that branch's first/last path slot, so
+    // they'd overlap. Spread them: each slot steps right by its "rank" = how many
+    // *shallower* slots share the same column and vertical band. The parent (before
+    // the branch) keeps the column; each deeper (inside-branch) slot moves right,
+    // so both stay clickable. Non-overlapping slots have rank 0 (unmoved). The
+    // *geometry* is computed always (so a drag can hit-test into a branch); the slot
+    // rects are only drawn while inserting/dragging (`allowNestedInsert`).
+    {
       const band = (info: SeriesInfo) => {
         const top = info.steps.length === 0 ? baseY : baseY + info.row * CELL_H;
         const bottom = info.steps.length === 0 ? baseY + height : top + CELL_H;
@@ -697,16 +692,21 @@ function renderRung(
           // branch rather than past the join line.
           const dir = index === last && index !== 0 ? -1 : 1;
           const dx = rank(c, top, top + CELL_H, info.steps.length) * SLOT_SPREAD * dir;
-          const cx = colX(c) + dx;
-          targets.push({ steps: info.steps, index, x: cx, top, bottom: top + CELL_H });
-          painter.parts.push(
-            svg`<rect class="hit-slot ${isDrop(info.steps, index) ? "targeted" : ""}"
-              x=${cx - 7} y=${top} width="14" height=${CELL_H}
-              @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,
-          );
+          const nx = colX(c) + dx;
+          targets.push({ steps: info.steps, index, x: nx, top, bottom: top + CELL_H });
+          if (edit.allowNestedInsert) {
+            painter.parts.push(
+              svg`<rect class="hit-slot ${isDrop(info.steps, index) ? "targeted" : ""}"
+                x=${nx - 7} y=${top} width="14" height=${CELL_H}
+                @click=${() => edit.onInsertElement(ri, info.steps, index)} />`,
+            );
+          }
         });
       }
-    } else if (edit.armed === null) {
+    }
+
+    // Nested element hit-targets: selectable + draggable when idle (armed null).
+    if (edit.armed === null) {
       for (const cell of walk.cells) {
         if (cell.steps.length === 0) continue;
         const sel =
@@ -717,9 +717,26 @@ function renderRung(
           edit.selected.ei === cell.ei;
         const x = colX(cell.col);
         painter.parts.push(
-          svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${x} y=${baseY + cell.row * CELL_H}
+          svg`<rect class="hit-el drag-el ${sel ? "sel" : ""}"
+            x=${x} y=${baseY + cell.row * CELL_H}
             width=${colX(cell.col + cell.cols) - x} height=${cell.rows * CELL_H}
-            @click=${() => edit.onSelectElement(ri, cell.steps, cell.ei)} />`,
+            @pointerdown=${(ev: PointerEvent) =>
+              edit.onElementPointerDown?.(ri, cell.steps, cell.ei, ev)} />`,
+        );
+      }
+    }
+
+    // Ghost the element being drag-reordered (source), at any depth.
+    if (edit.dragSource && edit.dragSource.ri === ri) {
+      const ds = edit.dragSource;
+      const cell = walk.cells.find(
+        (c) => c.ei === ds.ei && sameSteps(c.steps, ds.steps),
+      );
+      if (cell) {
+        const x = colX(cell.col);
+        painter.parts.push(
+          svg`<rect class="drag-ghost" x=${x} y=${baseY + cell.row * CELL_H}
+            width=${colX(cell.col + cell.cols) - x} height=${cell.rows * CELL_H} />`,
         );
       }
     }

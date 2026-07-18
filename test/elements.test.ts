@@ -27,12 +27,14 @@ import {
   removeRung,
   setNetworkTitle,
   setRungTitle,
+  elementAt,
+  moveElementAcross,
   updateCoil,
   updateElement,
   updateElementIn,
   wrapInBranch,
 } from "../src/elements";
-import { isBranch } from "../src/ir";
+import { Element, isBranch } from "../src/ir";
 
 function prog(): Program {
   return {
@@ -84,6 +86,87 @@ describe("wrapInBranch", () => {
       expect(isBranch(inner)).toBe(true);
       if (isBranch(inner)) expect(inner.branch[0]).toEqual([newContact("c")]);
     }
+  });
+});
+
+describe("elementAt", () => {
+  it("resolves a top-level and a nested element by its path", () => {
+    const p = prog();
+    p.networks[0].rungs[0].series = [
+      newContact("a"),
+      { branch: [[newContact("b"), newContact("c")]] },
+    ];
+    expect(elementAt(p, 0, 0, [], 0)).toEqual(newContact("a"));
+    expect(elementAt(p, 0, 0, [{ index: 1, path: 0 }], 1)).toEqual(newContact("c"));
+    expect(elementAt(p, 0, 0, [], 9)).toBeUndefined();
+  });
+});
+
+describe("moveElementAcross", () => {
+  function withSeries(series: Element[]): Program {
+    const p = prog();
+    p.networks[0].rungs[0].series = series;
+    return p;
+  }
+
+  it("reorders within the top-level series (self-removal shift)", () => {
+    const p = withSeries([newContact("a"), newContact("b"), newContact("c")]);
+    const r = moveElementAcross(p, 0, 0, { steps: [], ei: 0 }, { steps: [], index: 3 });
+    expect(r.networks[0].rungs[0].series).toEqual([
+      newContact("b"),
+      newContact("c"),
+      newContact("a"),
+    ]);
+  });
+
+  it("moves a top-level element into a branch path (index corrected)", () => {
+    const p = withSeries([newContact("a"), { branch: [[newContact("b")]] }]);
+    // Drop `a` after `b` inside path 0. The branch is at top index 1; removing `a`
+    // shifts it to 0, so the corrected target path is [{index:0,path:0}].
+    const r = moveElementAcross(
+      p,
+      0,
+      0,
+      { steps: [], ei: 0 },
+      { steps: [{ index: 1, path: 0 }], index: 1 },
+    );
+    const series = r.networks[0].rungs[0].series;
+    expect(series).toHaveLength(1);
+    const branch = series[0];
+    if (isBranch(branch)) {
+      expect(branch.branch[0]).toEqual([newContact("b"), newContact("a")]);
+    }
+  });
+
+  it("moves a nested element out to the top level", () => {
+    const p = withSeries([
+      { branch: [[newContact("a"), newContact("b")]] },
+      newContact("c"),
+    ]);
+    const r = moveElementAcross(
+      p,
+      0,
+      0,
+      { steps: [{ index: 0, path: 0 }], ei: 1 },
+      { steps: [], index: 2 },
+    );
+    const series = r.networks[0].rungs[0].series;
+    const branch = series[0];
+    if (isBranch(branch)) expect(branch.branch[0]).toEqual([newContact("a")]);
+    expect(series[1]).toEqual(newContact("c"));
+    expect(series[2]).toEqual(newContact("b"));
+  });
+
+  it("refuses to drop an element into itself", () => {
+    const p = withSeries([{ branch: [[newContact("a")]] }]);
+    const r = moveElementAcross(
+      p,
+      0,
+      0,
+      { steps: [], ei: 0 },
+      { steps: [{ index: 0, path: 0 }], index: 1 },
+    );
+    expect(r).toBe(p); // unchanged
   });
 });
 

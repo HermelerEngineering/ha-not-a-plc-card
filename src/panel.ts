@@ -96,6 +96,7 @@ import {
   addRung,
   insertCoil,
   insertElementIn,
+  moveElementAcross,
   moveElementIn,
   moveNetwork,
   moveRung,
@@ -117,14 +118,7 @@ import {
   updateElementIn,
   wrapInBranch,
 } from "./elements";
-import {
-  RungGeom,
-  ToolTarget,
-  hitRung,
-  nearestSlot,
-  nearestTarget,
-  reorderDelta,
-} from "./canvas";
+import { RungGeom, ToolTarget, hitRung, nearestTarget } from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { validateProgram } from "./validate";
 import { sameSteps } from "./layout";
@@ -212,8 +206,19 @@ export class NotAPlcPanel extends LitElement {
   @state() private _sel?: Selection;
   /** Whether the parameter popup is open (second click of the selection). */
   @state() private _modal = false;
-  /** In-progress top-level element drag (pointer-drag reorder, stage C). */
-  @state() private _drag?: { ni: number; ri: number; ei: number; drop: number };
+  /**
+   * In-progress element drag-reorder: the source element (ni/ri/steps/ei), whether
+   * it has moved past the click threshold yet, and the resolved drop slot (any
+   * insertion slot in the rung — top-level or inside a branch).
+   */
+  @state() private _drag?: {
+    ni: number;
+    ri: number;
+    steps: SeriesStep[];
+    ei: number;
+    moved: boolean;
+    target?: { steps: SeriesStep[]; index: number };
+  };
   /** In-progress palette element being dragged onto the live view, and its target. */
   @state() private _placeTool?: Tool;
   @state() private _placeTarget?: {
@@ -228,7 +233,7 @@ export class NotAPlcPanel extends LitElement {
   private _geom = new Map<number, RungGeom[]>();
   private _dragSvg: SVGSVGElement | null = null;
   private _dragStartX = 0;
-  private _dragMoved = false;
+  private _dragStartY = 0;
   private _placeStartX = 0;
   private _placeStartY = 0;
   private _placeMoved = false;
@@ -1412,17 +1417,23 @@ export class NotAPlcPanel extends LitElement {
     this._modal = false;
   }
 
-  // --- pointer-drag reorder of top-level elements (stage C) ------------------
+  // --- pointer-drag reorder of elements (top-level or into/within a branch) ---
 
-  private _elPointerDown(ni: number, ri: number, ei: number, ev: PointerEvent): void {
+  private _elPointerDown(
+    ni: number,
+    ri: number,
+    steps: SeriesStep[],
+    ei: number,
+    ev: PointerEvent,
+  ): void {
     // Only a plain left-button press in select mode starts a drag.
     if (this._tool || ev.button !== 0) return;
     // NB: `Element` here is the IR type, so reach the DOM node via `SVGElement`.
     const target = ev.target as SVGElement | null;
     this._dragSvg = target?.closest("svg") ?? null;
     this._dragStartX = ev.clientX;
-    this._dragMoved = false;
-    this._drag = { ni, ri, ei, drop: ei };
+    this._dragStartY = ev.clientY;
+    this._drag = { ni, ri, steps, ei, moved: false };
     window.addEventListener("pointermove", this._onDragMove);
     window.addEventListener("pointerup", this._onDragUp);
   }
@@ -1444,12 +1455,29 @@ export class NotAPlcPanel extends LitElement {
   private _dragMove(ev: PointerEvent): void {
     const d = this._drag;
     if (!d || !this._dragSvg) return;
-    if (Math.abs(ev.clientX - this._dragStartX) > 4) this._dragMoved = true;
+    let moved = d.moved;
+    if (
+      !moved &&
+      (Math.abs(ev.clientX - this._dragStartX) > 4 ||
+        Math.abs(ev.clientY - this._dragStartY) > 4)
+    ) {
+      moved = true;
+    }
+    // Resolve the drop slot among this rung's insertion slots (top-level or inside
+    // a branch), by nearest x within the slot's y-band.
     const geom = this._geom.get(d.ni)?.find((g) => g.ri === d.ri);
-    if (!geom) return;
-    const { x } = this._toUserXY(this._dragSvg, ev.clientX, ev.clientY);
-    const drop = nearestSlot(geom.slotXs, x);
-    if (drop !== d.drop) this._drag = { ...d, drop };
+    let target = d.target;
+    if (geom) {
+      const { x, y } = this._toUserXY(this._dragSvg, ev.clientX, ev.clientY);
+      const all = geom.targets.map((t) => ({ ...t, ri: d.ri }));
+      const t = nearestTarget(all, x, y);
+      target = t ? { steps: t.steps, index: t.index } : undefined;
+    }
+    const key = (t?: { steps: SeriesStep[]; index: number }) =>
+      t ? `${t.steps.map((s) => `${s.index}.${s.path}`).join("-")}|${t.index}` : "";
+    if (moved !== d.moved || key(target) !== key(d.target)) {
+      this._drag = { ...d, moved, target };
+    }
   }
 
   private _dragUp(): void {
@@ -1459,14 +1487,16 @@ export class NotAPlcPanel extends LitElement {
     this._drag = undefined;
     this._dragSvg = null;
     if (!d) return;
-    // Released without moving: treat as a plain click → select for the inspector.
-    if (!this._dragMoved) {
-      this._selectEl(d.ni, d.ri, [], d.ei);
+    // Released without moving: treat as a plain click → select (first click) or
+    // open the popup (second click of the same element).
+    if (!d.moved) {
+      this._selectEl(d.ni, d.ri, d.steps, d.ei);
       return;
     }
-    const delta = reorderDelta(d.ei, d.drop);
-    if (delta !== 0) {
-      this._edit((p) => moveElementIn(p, d.ni, d.ri, [], d.ei, delta));
+    if (d.target) {
+      this._edit((p) =>
+        moveElementAcross(p, d.ni, d.ri, { steps: d.steps, ei: d.ei }, d.target!),
+      );
     }
   }
 
@@ -1622,10 +1652,20 @@ export class NotAPlcPanel extends LitElement {
           ? { kind: "el", ni, ri: this._sel.ri, steps: this._sel.steps, ei: this._sel.ei }
           : { kind: "coil", ni, ri: this._sel.ri, ci: this._sel.ci };
     }
+    // An active reorder drag (past the click threshold) behaves like an armed
+    // element tool for the overlay: it shows insert slots (incl. inside branches)
+    // and highlights the resolved drop slot.
+    const reordering = (this._drag?.moved ?? false) && this._drag?.ni === ni;
     let placeDrop: CanvasEdit["placeDrop"] = null;
     const pt = this._placeTarget;
     if (this._placeTool?.target === "element" && pt && pt.ni === ni) {
       placeDrop = { ri: pt.ri, steps: pt.steps, index: pt.index };
+    } else if (reordering && this._drag?.target) {
+      placeDrop = {
+        ri: this._drag.ri,
+        steps: this._drag.target.steps,
+        index: this._drag.target.index,
+      };
     }
     // Positions flagged by validation (this network only), to tint red on the view.
     const issues = this._program ? validateProgram(this._program) : [];
@@ -1638,21 +1678,24 @@ export class NotAPlcPanel extends LitElement {
       .map((i) => ({ ri: i.ri, ci: i.ci! }));
     return {
       ni,
-      // While dragging a palette tool, arm its target so the insert slots show
-      // (the active drag wins over any persistently armed tool).
-      armed: this._placeTool?.target ?? this._tool?.target ?? null,
+      // While dragging a palette tool or reordering an element, arm "element" so the
+      // insert slots show (the active drag wins over any persistently armed tool).
+      armed:
+        this._placeTool?.target ?? this._tool?.target ?? (reordering ? "element" : null),
       selected,
-      drag:
+      dragSource:
         this._drag?.ni === ni
-          ? { ri: this._drag.ri, ei: this._drag.ei, drop: this._drag.drop }
+          ? { ri: this._drag.ri, steps: this._drag.steps, ei: this._drag.ei }
           : null,
       placeDrop,
       errorEls,
       errorCoils,
-      // Show nested insert slots for a persistently armed element tool, or while
-      // dragging an element in from the palette (so it can land inside a branch).
+      // Show nested insert slots for a persistently armed element tool, a palette
+      // element drag, or a reorder drag (so it can land inside a branch).
       allowNestedInsert:
-        this._tool?.target === "element" || this._placeTool?.target === "element",
+        this._tool?.target === "element" ||
+        this._placeTool?.target === "element" ||
+        reordering,
       onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
       onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
       onAddPath: (ri, steps, ei) => this._addBranchPath(ni, ri, steps, ei),
@@ -1663,7 +1706,8 @@ export class NotAPlcPanel extends LitElement {
         arr.push({ ri, ...geom });
         this._geom.set(ni, arr);
       },
-      onElementPointerDown: (ri, ei, ev) => this._elPointerDown(ni, ri, ei, ev),
+      onElementPointerDown: (ri, steps, ei, ev) =>
+        this._elPointerDown(ni, ri, steps, ei, ev),
     };
   }
 
@@ -2250,12 +2294,6 @@ export class NotAPlcPanel extends LitElement {
       fill: color-mix(in srgb, var(--primary-color) 20%, transparent);
       cursor: grabbing;
     }
-    .cv-svg .drop-indicator {
-      stroke: var(--primary-color);
-      stroke-width: 2.5;
-      stroke-linecap: round;
-      pointer-events: none;
-    }
     .cv-svg .add-path {
       cursor: pointer;
     }
@@ -2301,6 +2339,14 @@ export class NotAPlcPanel extends LitElement {
     }
     .cv-svg .err-cell {
       fill: color-mix(in srgb, var(--error-color, #c62828) 22%, transparent);
+      pointer-events: none;
+    }
+    .cv-svg .drag-ghost {
+      fill: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      stroke: var(--primary-color);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 3;
+      opacity: 0.6;
       pointer-events: none;
     }
     .modal-backdrop {

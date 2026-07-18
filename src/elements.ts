@@ -288,6 +288,75 @@ export function moveElementIn(
   return editSeriesAt(program, ni, ri, steps, (s) => moveItem(s, ei, delta));
 }
 
+/** The element addressed by (steps, ei) in a rung, or undefined. */
+export function elementAt(
+  program: Program,
+  ni: number,
+  ri: number,
+  steps: SeriesStep[],
+  ei: number,
+): Element | undefined {
+  let series = program.networks[ni]?.rungs[ri]?.series;
+  for (const step of steps) {
+    const el = series?.[step.index];
+    if (!el || !isBranch(el)) return undefined;
+    series = el.branch[step.path];
+  }
+  return series?.[ei];
+}
+
+function stepsEqual(a: SeriesStep[], b: SeriesStep[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((s, i) => s.index === b[i].index && s.path === b[i].path)
+  );
+}
+
+/** Whether `pre` is a strict (shorter) prefix of `full`. */
+function isStrictPrefix(pre: SeriesStep[], full: SeriesStep[]): boolean {
+  return (
+    pre.length < full.length &&
+    pre.every((s, i) => s.index === full[i].index && s.path === full[i].path)
+  );
+}
+
+/**
+ * Move the element at (from.steps, from.ei) to insertion slot (to.steps, to.index)
+ * within one rung — the drag-into/within-a-branch operation. The source is removed
+ * first, so the target index/path is corrected for that shift; dropping an element
+ * into itself is refused. A move within one series reduces to a reorder.
+ */
+export function moveElementAcross(
+  program: Program,
+  ni: number,
+  ri: number,
+  from: { steps: SeriesStep[]; ei: number },
+  to: { steps: SeriesStep[]; index: number },
+): Program {
+  const el = elementAt(program, ni, ri, from.steps, from.ei);
+  if (!el) return program;
+
+  let steps = to.steps;
+  let index = to.index;
+  const L = from.steps.length;
+  if (stepsEqual(from.steps, to.steps)) {
+    // Same series: after removing from.ei, later slots shift down by one.
+    if (index > from.ei) index -= 1;
+  } else if (isStrictPrefix(from.steps, to.steps)) {
+    // The target is inside a branch of the source series; its L-th step indexes
+    // that source series. A target inside the moved element itself is invalid.
+    const nextIdx = to.steps[L].index;
+    if (nextIdx === from.ei) return program;
+    if (nextIdx > from.ei) {
+      steps = to.steps.map((s, i) => (i === L ? { ...s, index: s.index - 1 } : s));
+    }
+  }
+  // Otherwise the target series is unrelated (or an ancestor) — no shift.
+
+  const removed = removeElementIn(program, ni, ri, from.steps, from.ei);
+  return insertElementIn(removed, ni, ri, steps, index, el);
+}
+
 // Top-level convenience wrappers (steps = []).
 export function addElement(
   program: Program,

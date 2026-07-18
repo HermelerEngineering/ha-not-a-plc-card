@@ -1048,7 +1048,9 @@ export class NotAPlcPanel extends LitElement {
    * currently selected, wrap that element in an OR branch and report handled.
    */
   private _maybeWrapSelection(tool: Tool): boolean {
-    if (tool.target !== "element" || !isBranch(tool.make())) return false;
+    // The OR tool makes a branch; `tool.make()` is Element | Output, so narrow by
+    // the `branch` property rather than isBranch (which wants an Element).
+    if (tool.target !== "element" || !("branch" in tool.make())) return false;
     const s = this._sel;
     if (!this._program || s?.kind !== "el") return false;
     const el = this._elementAt(s.ni, s.ri, s.steps, s.ei);

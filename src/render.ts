@@ -35,7 +35,7 @@ import {
   isMove,
   isNot,
 } from "./ir";
-import { blockPinRows, fbBlock } from "./block";
+import { blockPinRows, fbBlock, outputBlock } from "./block";
 import { SlotTarget } from "./canvas";
 import { SeriesStep } from "./elements";
 import {
@@ -46,13 +46,6 @@ import {
   walkSeries,
 } from "./layout";
 import { PowerFlow } from "./power-flow";
-
-const CALC_SYMBOL: Record<string, string> = {
-  ADD: "+",
-  SUB: "−",
-  MUL: "×",
-  DIV: "÷",
-};
 
 const OP_SYMBOL: Record<CompareOp, string> = {
   GT: ">",
@@ -81,6 +74,10 @@ export const RUNG_GAP = 12;
 const SLOT_SPREAD = 15;
 /** Vertical gap between a function block's stacked pins (px). */
 const PIN_GAP = 20;
+/** Vertical gap between a coil-column output block's stacked pins (px). */
+const OUT_PIN_GAP = 18;
+/** Right-hand space reserved for a rung with a REAL output block (move/calc). */
+const OUTPUT_BLOCK_SPACE = 214;
 
 /** Pixel X of the left edge of grid column `col` within a rung. */
 function colX(col: number): number {
@@ -416,8 +413,12 @@ function renderRung(
   );
   const res = painter.drawSeries(rung.series, 0, 0, true);
 
-  // Wire from the last element to the coils on the right, then the coils.
-  const coilX = Math.max(colX(res.endCol) + 24, width - 120);
+  // Wire from the last element to the coils on the right, then the coils. A
+  // move/calc output draws a wider TIA-style box, so reserve more room on the
+  // right for those rungs.
+  const hasOutputBlock = rung.coils.some((o) => isMove(o) || isCalc(o));
+  const rightSpace = hasOutputBlock ? OUTPUT_BLOCK_SPACE : 120;
+  const coilX = Math.max(colX(res.endCol) + 24, width - rightSpace);
   painter.parts.push(
     svg`<line x1=${colX(res.endCol)} y1=${baselineY} x2=${coilX} y2=${baselineY} class=${wireClass(res.poweredOut)} />`,
   );
@@ -436,53 +437,56 @@ function renderRung(
     // spacing used between a branch bus and its parallel contacts.
     const cx = coilX + CELL_W / 2;
 
-    if (isMove(output)) {
-      // A move is drawn as a box "dst := src" coloured by the rung result.
+    if (isMove(output) || isCalc(output)) {
+      // TIA-style output box: operand inputs on the left, destination on the
+      // right, enable (the rung result) into the top-left corner. Same face as a
+      // function block (see block.ts), coloured by whether the rung energised it.
+      const layout = outputBlock(output, state);
+      const pinRows = blockPinRows(layout);
       const cls = energised ? "symbol live" : "symbol";
-      const boxW = 74;
-      const boxH = 26;
-      painter.parts.push(
-        svg`<line x1=${coilX} y1=${cy} x2=${cx - boxW / 2} y2=${cy} class=${wireClass(energised)} />`,
-      );
-      painter.parts.push(
-        svg`<rect x=${cx - boxW / 2} y=${cy - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
-      );
-      const dstVal = fmtNumber(state[output.dst]);
-      const dstLabel = dstVal !== null ? `${output.dst} = ${dstVal}` : output.dst;
-      painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${dstLabel}</text>`);
-      let srcLabel = String(output.src);
-      if (typeof output.src === "string") {
-        const sv = fmtNumber(state[output.src]);
-        if (sv !== null) srcLabel = `${output.src}=${sv}`;
-      }
-      painter.parts.push(
-        svg`<text x=${cx} y=${cy + 4} class="compare-text">:= ${srcLabel}</text>`,
-      );
-      return;
-    }
+      const boxW = 56;
+      const boxLeft = coilX + 76;
+      const boxRight = boxLeft + boxW;
+      const boxCx = (boxLeft + boxRight) / 2;
+      // Pins are centred vertically on the coil row so the box fits its height.
+      const pinY = (idx: number) => cy + (idx - (pinRows - 1) / 2) * OUT_PIN_GAP;
+      const boxTop = pinY(0) - 14;
+      const boxBottom = pinY(pinRows - 1) + 14;
 
-    if (isCalc(output)) {
-      // dst := a <op> b box, coloured by the rung result.
-      const cls = energised ? "symbol live" : "symbol";
-      const boxW = 92;
-      const boxH = 26;
+      // Enable wire: from the coil tap up the bus, then into the top-left corner.
       painter.parts.push(
-        svg`<line x1=${coilX} y1=${cy} x2=${cx - boxW / 2} y2=${cy} class=${wireClass(energised)} />`,
+        svg`<line x1=${coilX} y1=${cy} x2=${coilX} y2=${boxTop} class=${wireClass(energised)} />`,
       );
       painter.parts.push(
-        svg`<rect x=${cx - boxW / 2} y=${cy - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+        svg`<line x1=${coilX} y1=${boxTop} x2=${boxLeft} y2=${boxTop} class=${wireClass(energised)} />`,
       );
-      const dstVal = fmtNumber(state[output.dst]);
-      const dstLabel = dstVal !== null ? `${output.dst} = ${dstVal}` : output.dst;
-      painter.parts.push(svg`<text x=${cx} y=${cy - 20} class="tag">${dstLabel}</text>`);
-      const operand = (o: number | string): string => {
-        if (typeof o !== "string") return String(o);
-        const v = fmtNumber(state[o]);
-        return v !== null ? `${o}=${v}` : o;
-      };
-      const expr = `${operand(output.a)} ${CALC_SYMBOL[output.op] ?? "?"} ${operand(output.b)}`;
       painter.parts.push(
-        svg`<text x=${cx} y=${cy + 4} class="compare-text">:= ${expr}</text>`,
+        svg`<rect x=${boxLeft} y=${boxTop} width=${boxW} height=${boxBottom - boxTop} rx="3" class=${cls} fill="none" />`,
+      );
+      painter.parts.push(
+        svg`<text x=${boxCx} y=${boxTop - 4} class="fb-text">${layout.title}</text>`,
+      );
+      layout.ins.forEach((pin, idx) => {
+        const py = pinY(idx);
+        painter.parts.push(
+          svg`<text x=${boxLeft + 5} y=${py + 4} class="pin-l">${pin.label}</text>`,
+        );
+        painter.parts.push(
+          svg`<line x1=${boxLeft - 12} y1=${py} x2=${boxLeft} y2=${py} class="wire" />`,
+        );
+        painter.parts.push(
+          svg`<text x=${boxLeft - 14} y=${py + 4} class="pin-v-l">${pin.value}</text>`,
+        );
+      });
+      // The destination pin sits on the coil row (right edge).
+      painter.parts.push(
+        svg`<text x=${boxRight - 5} y=${cy + 4} class="pin-r">${layout.outs[0].label}</text>`,
+      );
+      painter.parts.push(
+        svg`<line x1=${boxRight} y1=${cy} x2=${boxRight + 12} y2=${cy} class="wire" />`,
+      );
+      painter.parts.push(
+        svg`<text x=${boxRight + 14} y=${cy + 4} class="pin-v-r">${layout.outs[0].value}</text>`,
       );
       return;
     }
@@ -575,8 +579,11 @@ function renderRung(
       }
     }
 
-    rung.coils.forEach((_coil, i) => {
+    rung.coils.forEach((coil, i) => {
       const cy = baselineY + i * CELL_H;
+      // A move/calc draws a wider box than a simple coil; widen its hit-target so
+      // the whole block (and its value labels) is clickable/outlined.
+      const hitW = isMove(coil) || isCalc(coil) ? OUTPUT_BLOCK_SPACE : CELL_W;
       const sel =
         edit.selected?.kind === "coil" &&
         edit.selected.ni === edit.ni &&
@@ -585,12 +592,12 @@ function renderRung(
       if (edit.armed === null) {
         painter.parts.push(
           svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${coilX} y=${cy - CELL_H / 2}
-            width=${CELL_W} height=${CELL_H} @click=${() => edit.onSelectCoil(ri, i)} />`,
+            width=${hitW} height=${CELL_H} @click=${() => edit.onSelectCoil(ri, i)} />`,
         );
       } else if (sel) {
         painter.parts.push(
           svg`<rect class="sel-outline" x=${coilX} y=${cy - CELL_H / 2}
-            width=${CELL_W} height=${CELL_H} />`,
+            width=${hitW} height=${CELL_H} />`,
         );
       }
     });

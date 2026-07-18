@@ -142,7 +142,7 @@ import {
   setTag,
 } from "./tags";
 
-const VIEW_WIDTH = 720;
+const VIEW_WIDTH = 760;
 
 const TAG_KINDS: TagKind[] = ["input", "coil", "memory", "temp"];
 const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];

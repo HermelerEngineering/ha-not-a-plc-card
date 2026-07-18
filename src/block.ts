@@ -12,7 +12,14 @@
  * SVG geometry lives in `render.ts`.
  */
 
-import { FunctionBlockDef, StateImage } from "./ir";
+import { CalcEl, FunctionBlockDef, MoveEl, StateImage } from "./ir";
+
+const CALC_NAME: Record<string, string> = {
+  ADD: "ADD",
+  SUB: "SUB",
+  MUL: "MUL",
+  DIV: "DIV",
+};
 
 export interface BlockPin {
   /** Short role label drawn inside the box (e.g. "IN", "PT", "Q", "ET"). */
@@ -131,4 +138,40 @@ export function fbBlock(
 /** Number of pin rows a block face needs (power pin row + parameter rows). */
 export function blockPinRows(layout: BlockLayout): number {
   return Math.max(layout.ins.length, layout.outs.length);
+}
+
+/** An operand (number / REAL tag / fb output) as a label with its live value. */
+function operandLabel(operand: number | string, state: StateImage): string {
+  if (typeof operand !== "string") return String(operand);
+  const v = fmtNum(state[operand]);
+  return v !== undefined ? `${operand}=${v}` : operand;
+}
+
+/**
+ * The pin face for a REAL output (move/calc) — the same idea as `fbBlock` but for
+ * the coil-column boxes: operand inputs on the left, the destination on the right.
+ * `move` has one input (IN = src); `calc` has two (IN1 = a, IN2 = b) with the
+ * operator as the title. All pins carry a value (there is no rung-power pin — the
+ * enable is the incoming rung wire, drawn separately).
+ */
+export function outputBlock(
+  output: MoveEl | CalcEl,
+  state: StateImage,
+): BlockLayout {
+  const dst: BlockPin = { label: "OUT", value: operandLabel(output.dst, state) };
+  if (output.type === "move") {
+    return {
+      title: "MOVE",
+      ins: [{ label: "IN", value: operandLabel(output.src, state) }],
+      outs: [dst],
+    };
+  }
+  return {
+    title: CALC_NAME[output.op] ?? "CALC",
+    ins: [
+      { label: "IN1", value: operandLabel(output.a, state) },
+      { label: "IN2", value: operandLabel(output.b, state) },
+    ],
+    outs: [dst],
+  };
 }

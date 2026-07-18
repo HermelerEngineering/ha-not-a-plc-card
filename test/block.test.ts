@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { blockPinRows, fbBlock } from "../src/block";
+import { blockPinRows, fbBlock, outputBlock } from "../src/block";
 
 describe("fbBlock", () => {
   it("gives a timer IN/PT inputs and Q/ET outputs, power pins first", () => {
@@ -54,5 +54,38 @@ describe("fbBlock", () => {
   it("labels an unknown/undefined block as FB with one power pin row", () => {
     expect(fbBlock("x", undefined, {}).title).toBe("FB");
     expect(blockPinRows(fbBlock("x", undefined, {}))).toBe(1);
+  });
+});
+
+describe("outputBlock", () => {
+  it("gives a move one IN input and an OUT output with live values", () => {
+    const b = outputBlock(
+      { type: "move", dst: "level", src: "raw" },
+      { raw: 12.5, level: 12.5 },
+    );
+    expect(b.title).toBe("MOVE");
+    expect(b.ins.map((p) => p.label)).toEqual(["IN"]);
+    expect(b.ins[0].value).toBe("raw=12.5");
+    expect(b.outs[0].label).toBe("OUT");
+    expect(b.outs[0].value).toBe("level=12.5");
+    expect(blockPinRows(b)).toBe(1);
+  });
+
+  it("shows a numeric move source verbatim", () => {
+    const b = outputBlock({ type: "move", dst: "sp", src: 21 }, {});
+    expect(b.ins[0].value).toBe("21");
+  });
+
+  it("gives a calc two inputs titled by its operator", () => {
+    const b = outputBlock(
+      { type: "calc", op: "ADD", dst: "out", a: "x", b: 5 },
+      { x: 3, out: 8 },
+    );
+    expect(b.title).toBe("ADD");
+    expect(b.ins.map((p) => p.label)).toEqual(["IN1", "IN2"]);
+    expect(b.ins[0].value).toBe("x=3");
+    expect(b.ins[1].value).toBe("5");
+    expect(b.outs[0].value).toBe("out=8");
+    expect(blockPinRows(b)).toBe(2);
   });
 });

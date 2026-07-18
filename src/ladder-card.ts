@@ -17,7 +17,7 @@ import { Program, StateImage } from "./ir";
 import { computePowerFlow } from "./power-flow";
 import { renderNetwork } from "./render";
 
-const VIEW_WIDTH = 720;
+const VIEW_WIDTH = 760;
 
 @defineOnce("not-a-plc-card")
 export class NotAPlcCard extends LitElement {

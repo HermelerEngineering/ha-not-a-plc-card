@@ -127,6 +127,7 @@ import {
 } from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { validateProgram } from "./validate";
+import { sameSteps } from "./layout";
 import { CanvasEdit, RUNG_GAP, renderNetwork } from "./render";
 import {
   BOOL_DOMAINS,
@@ -209,6 +210,8 @@ export class NotAPlcPanel extends LitElement {
   @state() private _loaded = false;
   @state() private _tool?: Tool;
   @state() private _sel?: Selection;
+  /** Whether the parameter popup is open (second click of the selection). */
+  @state() private _modal = false;
   /** In-progress top-level element drag (pointer-drag reorder, stage C). */
   @state() private _drag?: { ni: number; ri: number; ei: number; drop: number };
   /** In-progress palette element being dragged onto the live view, and its target. */
@@ -1297,6 +1300,7 @@ export class NotAPlcPanel extends LitElement {
   private _armTool(tool?: Tool): void {
     this._tool = this._tool?.label === tool?.label ? undefined : tool;
     this._sel = undefined;
+    this._modal = false;
   }
 
   private _elementAt(
@@ -1319,9 +1323,11 @@ export class NotAPlcPanel extends LitElement {
     if (!this._program || tool?.target !== "element") return;
     const el = tool.make() as Element;
     this._update(insertElementIn(this._program, ni, ri, steps, index, el));
-    // Place-then-configure: drop the tool and select the new element to edit it.
+    // Place-then-select: drop the tool and select the new element (no popup yet;
+    // click it again to open the parameter popup).
     this._tool = undefined;
     this._sel = { kind: "el", ni, ri, steps, ei: index };
+    this._modal = false;
   }
 
   private _placeCoil(ni: number, ri: number, index: number): void {
@@ -1331,6 +1337,7 @@ export class NotAPlcPanel extends LitElement {
     this._update(insertCoil(this._program, ni, ri, index, output));
     this._tool = undefined;
     this._sel = { kind: "coil", ni, ri, ci: index };
+    this._modal = false;
   }
 
   /**
@@ -1353,6 +1360,7 @@ export class NotAPlcPanel extends LitElement {
         steps: [...steps, { index: ei, path: pathIndex }],
         ei: 0,
       };
+      this._modal = false;
     } else {
       this._update(addBranchPath(this._program, ni, ri, steps, ei, []));
     }
@@ -1360,12 +1368,32 @@ export class NotAPlcPanel extends LitElement {
 
   private _selectEl(ni: number, ri: number, steps: SeriesStep[], ei: number): void {
     if (this._tool) return; // placing, not selecting
+    const s = this._sel;
+    // First click selects (outline); a second click on the same element opens the
+    // popup — so a plain click, and place-then-select, never trigger the modal.
+    if (
+      s?.kind === "el" &&
+      s.ni === ni &&
+      s.ri === ri &&
+      s.ei === ei &&
+      sameSteps(s.steps, steps)
+    ) {
+      this._modal = true;
+      return;
+    }
     this._sel = { kind: "el", ni, ri, steps, ei };
+    this._modal = false;
   }
 
   private _selectCoil(ni: number, ri: number, ci: number): void {
     if (this._tool) return;
+    const s = this._sel;
+    if (s?.kind === "coil" && s.ni === ni && s.ri === ri && s.ci === ci) {
+      this._modal = true;
+      return;
+    }
     this._sel = { kind: "coil", ni, ri, ci };
+    this._modal = false;
   }
 
   // --- pointer-drag reorder of top-level elements (stage C) ------------------
@@ -1520,6 +1548,7 @@ export class NotAPlcPanel extends LitElement {
       this._update(insertElementIn(this._program, ni, ri, steps, index, tool.make() as Element));
       this._sel = { kind: "el", ni, ri, steps, ei: index };
     }
+    this._modal = false;
   }
 
   private _renderCanvas(): TemplateResult {
@@ -1559,7 +1588,7 @@ export class NotAPlcPanel extends LitElement {
           ? `Drag onto a rung to place “${this._placeTool.label}”.`
           : this._tool
             ? `Drag a tool onto the ladder, or click a ＋ slot to place “${this._tool.label}”.`
-            : "Drag a tool onto the ladder to add it. Click an element to edit it, or drag it to reorder."}
+            : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to reorder."}
       </div>
       ${this._program.networks.map((net, ni) => this._renderCanvasNetwork(net, ni))}
       ${this._renderInspector()}
@@ -1667,7 +1696,7 @@ export class NotAPlcPanel extends LitElement {
    * without going to the separate "Function blocks" section.
    */
   private _renderInspector(): TemplateResult {
-    if (!this._sel || !this._program) return html``;
+    if (!this._sel || !this._modal || !this._program) return html``;
     let title: string;
     let body: TemplateResult;
     if (this._sel.kind === "el") {
@@ -1712,7 +1741,9 @@ export class NotAPlcPanel extends LitElement {
   }
 
   private _closeInspector(): void {
-    this._sel = undefined;
+    // Close the popup but keep the element selected (outlined); click it again to
+    // reopen.
+    this._modal = false;
   }
 
   private _elementTitle(el: Element): string {

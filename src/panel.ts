@@ -2560,10 +2560,34 @@ export class NotAPlcPanel extends LitElement {
       border: 1px solid var(--divider-color, #ccc);
       border-radius: 10px;
       min-width: 320px;
-      max-width: min(560px, 92vw);
+      max-width: min(600px, 94vw);
       max-height: 85vh;
       overflow: auto;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    }
+    /* Inside the popup, stack an element editor's fields vertically so wide
+       editors (a service call's service/entity/value) never overflow sideways.
+       The inline structure editor keeps its compact horizontal row. */
+    .modal .el-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .modal .el-row .spacer {
+      display: none;
+    }
+    .modal .el-row .el-type {
+      min-width: 0;
+    }
+    .modal .el-row select,
+    .modal .el-row input,
+    .modal .el-row .right-input,
+    .modal .el-row .action-data {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .modal .el-row > button.icon {
+      align-self: flex-end;
     }
     .modal-head {
       display: flex;

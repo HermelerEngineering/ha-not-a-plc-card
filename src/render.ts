@@ -25,6 +25,7 @@ import {
   FunctionBlockDef,
   Network,
   NotEl,
+  Output,
   Rung,
   StateImage,
   isBranch,
@@ -75,9 +76,14 @@ const SLOT_SPREAD = 15;
 /** Vertical gap between a function block's stacked pins (px). */
 const PIN_GAP = 20;
 /** Vertical gap between a coil-column output block's stacked pins (px). */
-const OUT_PIN_GAP = 18;
+const OUT_PIN_GAP = 16;
 /** Right-hand space reserved for a rung with a REAL output block (move/calc). */
 const OUTPUT_BLOCK_SPACE = 214;
+
+/** Number of coil-column rows an output occupies (a taller calc claims two). */
+function outputRows(output: Output): number {
+  return isCalc(output) ? 2 : 1;
+}
 
 /** Pixel X of the left edge of grid column `col` within a rung. */
 function colX(col: number): number {
@@ -396,12 +402,23 @@ function renderRung(
   ri = 0,
 ): { part: SVGTemplateResult; height: number } {
   const measure = measureSeries(rung.series);
-  // The rung is as tall as its widest need: the series' branch rows or, when
-  // there are several coils, the stacked coil rows (first coil on the baseline,
-  // extra coils below like parallel branch paths).
-  const rows = Math.max(measure.rows, rung.coils.length);
   const painter = new RungPainter(baseY, flow, fbs, state);
   const baselineY = rowY(baseY, 0);
+
+  // Each output claims one or more coil rows: a simple coil sits centred on one
+  // row; a move/calc draws a taller TIA-style box (power line on top, operand rows
+  // below) so it claims extra rows. `coilTaps[i]` is the y of output i's power
+  // line; outputs stack by their own heights rather than a fixed row each.
+  const coilTaps: number[] = [];
+  let coilRowAcc = 0;
+  for (const output of rung.coils) {
+    coilTaps.push(baselineY + coilRowAcc * CELL_H);
+    coilRowAcc += outputRows(output);
+  }
+  const totalCoilRows = coilRowAcc;
+  // The rung is as tall as its widest need: the series' branch rows or the stacked
+  // coil rows.
+  const rows = Math.max(measure.rows, totalCoilRows, 1);
 
   // Left rail is always powered; draw it and a live stub that connects the rail
   // to the first element (no gap between the rail and the energised wire).
@@ -424,7 +441,7 @@ function renderRung(
   );
   // Vertical bus down the coil column so stacked coils share the rung's power.
   if (rung.coils.length > 1) {
-    const busBottom = baselineY + (rung.coils.length - 1) * CELL_H;
+    const busBottom = coilTaps[coilTaps.length - 1];
     painter.parts.push(
       svg`<line x1=${coilX} y1=${baselineY} x2=${coilX} y2=${busBottom} class=${wireClass(res.poweredOut)} />`,
     );
@@ -432,42 +449,40 @@ function renderRung(
   rung.coils.forEach((output, i) => {
     const cf = flow.coils.get(output);
     const energised = cf?.energised ?? false;
-    const cy = baselineY + i * CELL_H;
+    const cy = coilTaps[i];
     // Sit the output about half a cell right of the bus, so the stub matches the
     // spacing used between a branch bus and its parallel contacts.
     const cx = coilX + CELL_W / 2;
 
     if (isMove(output) || isCalc(output)) {
-      // TIA-style output box: operand inputs on the left, destination on the
-      // right, enable (the rung result) into the top-left corner. Same face as a
-      // function block (see block.ts), coloured by whether the rung energised it.
+      // TIA-style output box aligned like a function block: the enable (rung
+      // result) runs straight in along the coil row (the box's top row), the box
+      // hangs below it, operand inputs stack down the left, the destination sits
+      // on the right at the first operand row. Coloured by whether it energised.
       const layout = outputBlock(output, state);
-      const pinRows = blockPinRows(layout);
       const cls = energised ? "symbol live" : "symbol";
       const boxW = 56;
       const boxLeft = coilX + 76;
       const boxRight = boxLeft + boxW;
       const boxCx = (boxLeft + boxRight) / 2;
-      // Pins are centred vertically on the coil row so the box fits its height.
-      const pinY = (idx: number) => cy + (idx - (pinRows - 1) / 2) * OUT_PIN_GAP;
-      const boxTop = pinY(0) - 14;
-      const boxBottom = pinY(pinRows - 1) + 14;
+      // Operand k sits one gap below the power line; the box spans from just above
+      // the power line to just below the last operand.
+      const opY = (k: number) => cy + (k + 1) * OUT_PIN_GAP;
+      const boxTop = cy - 15;
+      const boxBottom = opY(layout.ins.length - 1) + 11;
 
-      // Enable wire: from the coil tap up the bus, then into the top-left corner.
+      // Enable wire straight in along the power row, into the box's left edge.
       painter.parts.push(
-        svg`<line x1=${coilX} y1=${cy} x2=${coilX} y2=${boxTop} class=${wireClass(energised)} />`,
-      );
-      painter.parts.push(
-        svg`<line x1=${coilX} y1=${boxTop} x2=${boxLeft} y2=${boxTop} class=${wireClass(energised)} />`,
+        svg`<line x1=${coilX} y1=${cy} x2=${boxLeft} y2=${cy} class=${wireClass(energised)} />`,
       );
       painter.parts.push(
         svg`<rect x=${boxLeft} y=${boxTop} width=${boxW} height=${boxBottom - boxTop} rx="3" class=${cls} fill="none" />`,
       );
       painter.parts.push(
-        svg`<text x=${boxCx} y=${boxTop - 4} class="fb-text">${layout.title}</text>`,
+        svg`<text x=${boxCx} y=${cy + 4} class="fb-text">${layout.title}</text>`,
       );
-      layout.ins.forEach((pin, idx) => {
-        const py = pinY(idx);
+      layout.ins.forEach((pin, k) => {
+        const py = opY(k);
         painter.parts.push(
           svg`<text x=${boxLeft + 5} y=${py + 4} class="pin-l">${pin.label}</text>`,
         );
@@ -478,15 +493,16 @@ function renderRung(
           svg`<text x=${boxLeft - 14} y=${py + 4} class="pin-v-l">${pin.value}</text>`,
         );
       });
-      // The destination pin sits on the coil row (right edge).
+      // The destination pin sits on the right at the first operand row.
+      const dstY = opY(0);
       painter.parts.push(
-        svg`<text x=${boxRight - 5} y=${cy + 4} class="pin-r">${layout.outs[0].label}</text>`,
+        svg`<text x=${boxRight - 5} y=${dstY + 4} class="pin-r">${layout.outs[0].label}</text>`,
       );
       painter.parts.push(
-        svg`<line x1=${boxRight} y1=${cy} x2=${boxRight + 12} y2=${cy} class="wire" />`,
+        svg`<line x1=${boxRight} y1=${dstY} x2=${boxRight + 12} y2=${dstY} class="wire" />`,
       );
       painter.parts.push(
-        svg`<text x=${boxRight + 14} y=${cy + 4} class="pin-v-r">${layout.outs[0].value}</text>`,
+        svg`<text x=${boxRight + 14} y=${dstY + 4} class="pin-v-r">${layout.outs[0].value}</text>`,
       );
       return;
     }
@@ -580,10 +596,12 @@ function renderRung(
     }
 
     rung.coils.forEach((coil, i) => {
-      const cy = baselineY + i * CELL_H;
-      // A move/calc draws a wider box than a simple coil; widen its hit-target so
-      // the whole block (and its value labels) is clickable/outlined.
-      const hitW = isMove(coil) || isCalc(coil) ? OUTPUT_BLOCK_SPACE : CELL_W;
+      const cy = coilTaps[i];
+      // A move/calc draws a wider, taller box than a simple coil; widen and
+      // heighten its hit-target so the whole block (and its labels) is clickable.
+      const isBlock = isMove(coil) || isCalc(coil);
+      const hitW = isBlock ? OUTPUT_BLOCK_SPACE : CELL_W;
+      const hitH = outputRows(coil) * CELL_H;
       const sel =
         edit.selected?.kind === "coil" &&
         edit.selected.ni === edit.ni &&
@@ -592,17 +610,17 @@ function renderRung(
       if (edit.armed === null) {
         painter.parts.push(
           svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${coilX} y=${cy - CELL_H / 2}
-            width=${hitW} height=${CELL_H} @click=${() => edit.onSelectCoil(ri, i)} />`,
+            width=${hitW} height=${hitH} @click=${() => edit.onSelectCoil(ri, i)} />`,
         );
       } else if (sel) {
         painter.parts.push(
           svg`<rect class="sel-outline" x=${coilX} y=${cy - CELL_H / 2}
-            width=${hitW} height=${CELL_H} />`,
+            width=${hitW} height=${hitH} />`,
         );
       }
     });
     if (edit.armed === "coil") {
-      const cy = baselineY + rung.coils.length * CELL_H;
+      const cy = baselineY + totalCoilRows * CELL_H;
       painter.parts.push(
         svg`<rect class="hit-slot" x=${coilX} y=${cy - CELL_H / 2} width=${CELL_W} height="14"
           @click=${() => edit.onInsertCoil(ri, rung.coils.length)} />`,

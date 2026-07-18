@@ -57,13 +57,14 @@ function prog(): Program {
 }
 
 describe("wrapInBranch", () => {
-  it("replaces the element with an OR branch whose first path holds it", () => {
+  it("wraps the element in an OR branch with a second empty path to fill", () => {
     const p = wrapInBranch(prog(), 0, 0, [], 0);
     const el = p.networks[0].rungs[0].series[0];
     expect(isBranch(el)).toBe(true);
     if (isBranch(el)) {
-      expect(el.branch).toHaveLength(1);
+      expect(el.branch).toHaveLength(2);
       expect(el.branch[0]).toEqual([newContact("a")]);
+      expect(el.branch[1]).toEqual([]);
     }
   });
 

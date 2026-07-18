@@ -332,11 +332,11 @@ export function newBranch(): BranchEl {
 }
 
 /**
- * Replace the element at (steps, ei) with an OR branch whose first path contains
- * that element — "wrap the selection in an OR branch". The user then adds parallel
- * paths (via the branch editor's "+ path"). A branch is left unchanged (wrapping a
- * branch in a branch is not useful); the resulting single-path branch is valid
- * (each path is non-empty).
+ * Replace the element at (steps, ei) with an OR branch: the element in the first
+ * path and a second, empty path ready to fill — "wrap the selection in an OR
+ * branch". The empty path is what makes it an actual OR (the user fills it via its
+ * insert slots; validation flags it as empty until then). A branch is left
+ * unchanged (wrapping a branch in a branch is not useful).
  */
 export function wrapInBranch(
   program: Program,
@@ -346,7 +346,7 @@ export function wrapInBranch(
   ei: number,
 ): Program {
   return editSeriesAt(program, ni, ri, steps, (s) =>
-    mapAt(s, ei, (el) => (isBranch(el) ? el : { branch: [[el]] })),
+    mapAt(s, ei, (el) => (isBranch(el) ? el : { branch: [[el], []] })),
   );
 }
 

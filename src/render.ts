@@ -489,6 +489,15 @@ function renderRung(
       if (typeof target === "string" && target) {
         painter.parts.push(svg`<text x=${boxCx} y=${cy + 25} class="tag">${target}</text>`);
       }
+      // Any chosen option value (preset_mode, option, source, …), shown below.
+      const choice = Object.entries(output.data ?? {}).find(
+        ([k, v]) => k !== "entity_id" && typeof v === "string" && v,
+      );
+      if (choice) {
+        painter.parts.push(
+          svg`<text x=${boxCx} y=${cy + 38} class="tag">${String(choice[1])}</text>`,
+        );
+      }
       return;
     }
 

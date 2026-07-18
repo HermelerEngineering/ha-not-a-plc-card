@@ -43,6 +43,15 @@ import {
 } from "lit";
 import { property, state } from "lit/decorators.js";
 
+import {
+  ACTION_SERVICES,
+  actionEntity,
+  actionSpec,
+  actionValue,
+  withEntity,
+  withService,
+  withValue,
+} from "./actions";
 import { defineOnce } from "./define";
 import { HomeAssistant } from "./ha";
 import {
@@ -644,6 +653,12 @@ export class NotAPlcPanel extends LitElement {
     if (!source) return [];
     const attrs = this.hass?.states?.[source]?.attributes ?? {};
     return Object.keys(attrs).sort();
+  }
+
+  /** The string values of an entity's list-valued attribute (e.g. preset_modes). */
+  private _stateOptions(entityId: string, attr: string): string[] {
+    const raw = this.hass?.states?.[entityId]?.attributes?.[attr];
+    return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
   }
 
   private _datalists(): TemplateResult {
@@ -1314,41 +1329,7 @@ export class NotAPlcPanel extends LitElement {
     }
 
     if (isAction(output)) {
-      const set = (next: ActionEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
-      const setData = (raw: string) => {
-        try {
-          const parsed: unknown = JSON.parse(raw);
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            set({ ...output, data: parsed as Record<string, unknown> });
-          }
-        } catch {
-          /* keep the previous data until valid JSON is entered */
-        }
-      };
-      return html`
-        <div class="el-row">
-          <span class="el-type">do</span>
-          <input
-            class="right-input"
-            .value=${output.service}
-            placeholder="domain.service"
-            title="e.g. scene.turn_on, select.select_option, climate.set_preset_mode"
-            @change=${(e: Event) =>
-              set({
-                ...output,
-                service: (e.target as HTMLInputElement).value.trim(),
-              })}
-          />
-          <input
-            class="action-data"
-            .value=${JSON.stringify(output.data)}
-            placeholder='{"entity_id":"scene.movie"}'
-            title="Static service data (JSON): target entity, option, preset, …"
-            @change=${(e: Event) => setData((e.target as HTMLInputElement).value)}
-          />
-          ${del}
-        </div>
-      `;
+      return this._renderActionEditor(output, ni, ri, ci, del);
     }
 
     const coil = output;
@@ -1371,6 +1352,117 @@ export class NotAPlcPanel extends LitElement {
           )}
         </select>
         ${del}
+      </div>
+    `;
+  }
+
+  private _renderActionEditor(
+    output: ActionEl,
+    ni: number,
+    ri: number,
+    ci: number,
+    del: TemplateResult,
+  ): TemplateResult {
+    const set = (next: ActionEl) => this._edit((p) => updateCoil(p, ni, ri, ci, next));
+    const spec = actionSpec(output.service);
+
+    // A small <select>, including the current value even if it's off-list so it
+    // is preserved and shown rather than silently dropped.
+    const pick = (
+      value: string,
+      options: string[],
+      placeholder: string,
+      onChange: (v: string) => void,
+    ): TemplateResult => {
+      const opts = value && !options.includes(value) ? [value, ...options] : options;
+      return html`
+        <select
+          .value=${value}
+          @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+        >
+          <option value="" ?selected=${!value}>${placeholder}</option>
+          ${opts.map(
+            (o) => html`<option value=${o} ?selected=${o === value}>${o}</option>`,
+          )}
+        </select>
+      `;
+    };
+
+    const serviceSelect = html`
+      <select
+        title="Service to call on the rung's rising edge"
+        .value=${spec ? output.service : "__custom__"}
+        @change=${(e: Event) => {
+          const v = (e.target as HTMLSelectElement).value;
+          set(withService(output, v === "__custom__" ? "" : v));
+        }}
+      >
+        ${ACTION_SERVICES.map(
+          (s) =>
+            html`<option value=${s.service} ?selected=${s.service === output.service}>
+              ${s.label}
+            </option>`,
+        )}
+        <option value="__custom__" ?selected=${!spec}>Custom…</option>
+      </select>
+    `;
+
+    if (!spec) {
+      // Custom / advanced: free service string + raw JSON data.
+      const setData = (raw: string) => {
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            set({ ...output, data: parsed as Record<string, unknown> });
+          }
+        } catch {
+          /* keep the previous data until valid JSON is entered */
+        }
+      };
+      return html`
+        <div class="el-row">
+          <span class="el-type">do</span>
+          ${serviceSelect}
+          <input
+            class="right-input"
+            .value=${output.service}
+            placeholder="domain.service"
+            @change=${(e: Event) =>
+              set({ ...output, service: (e.target as HTMLInputElement).value.trim() })}
+          />
+          <input
+            class="action-data"
+            .value=${JSON.stringify(output.data)}
+            placeholder='{"entity_id":"scene.movie"}'
+            title="Static service data (JSON)"
+            @change=${(e: Event) => setData((e.target as HTMLInputElement).value)}
+          />
+          ${del}
+        </div>
+      `;
+    }
+
+    const entity = actionEntity(output);
+    const entitySelect = pick(
+      entity,
+      this._entityIds([spec.domain]),
+      "entity…",
+      (v) => set(withEntity(output, v)),
+    );
+    const valueSelect =
+      spec.optionsAttr && spec.valueKey
+        ? pick(
+            actionValue(output, spec.valueKey),
+            entity ? this._stateOptions(entity, spec.optionsAttr) : [],
+            spec.valueKey,
+            (v) => set(withValue(output, spec.valueKey!, v)),
+          )
+        : null;
+
+    return html`
+      <div class="el-row">
+        <span class="el-type">do</span>
+        ${serviceSelect} ${entitySelect} ${valueSelect ?? ""} ${del}
       </div>
     `;
   }

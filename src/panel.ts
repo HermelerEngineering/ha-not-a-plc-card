@@ -1043,6 +1043,20 @@ export class NotAPlcPanel extends LitElement {
     this._sel = { kind: "el", ni, ri, steps, ei };
   }
 
+  /**
+   * Select-then-OR: if `tool` is the OR/branch tool and a (non-branch) element is
+   * currently selected, wrap that element in an OR branch and report handled.
+   */
+  private _maybeWrapSelection(tool: Tool): boolean {
+    if (tool.target !== "element" || !isBranch(tool.make())) return false;
+    const s = this._sel;
+    if (!this._program || s?.kind !== "el") return false;
+    const el = this._elementAt(s.ni, s.ri, s.steps, s.ei);
+    if (!el || isBranch(el)) return false;
+    this._wrapInOr(s.ni, s.ri, s.steps, s.ei);
+    return true;
+  }
+
   private _removeBranchPath(
     ni: number,
     ri: number,
@@ -1515,9 +1529,11 @@ export class NotAPlcPanel extends LitElement {
     this._placeTool = undefined;
     this._placeTarget = undefined;
     if (!tool) return;
-    // A press-release without a drag behaves like the old click: arm the tool.
+    // A press-release without a drag behaves like the old click: arm the tool —
+    // except pressing the OR tool while an element is selected wraps that element
+    // in an OR branch (select-then-OR), matching the popup's "Wrap OR" action.
     if (!this._placeMoved) {
-      this._armTool(tool);
+      if (!this._maybeWrapSelection(tool)) this._armTool(tool);
       return;
     }
     // A coil tool appends to the rung it was dropped on; an element tool inserts

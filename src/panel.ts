@@ -638,6 +638,13 @@ export class NotAPlcPanel extends LitElement {
       .sort();
   }
 
+  /** Attribute keys of a source entity, for the per-tag attribute dropdown. */
+  private _attributeKeys(source: string | undefined): string[] {
+    if (!source) return [];
+    const attrs = this.hass?.states?.[source]?.attributes ?? {};
+    return Object.keys(attrs).sort();
+  }
+
   private _datalists(): TemplateResult {
     const options = (domains: string[]) =>
       this._entityIds(domains).map((id) => html`<option value=${id}></option>`);
@@ -682,12 +689,18 @@ export class NotAPlcPanel extends LitElement {
         )}
         <input
           class="attr-input"
+          list="np-attr-${name}"
           .value=${tag.attribute ?? ""}
           placeholder="attribute (optional)"
           title="Read state.attributes[…] instead of the entity state"
           @change=${(e: Event) =>
             this._setAttribute(name, (e.target as HTMLInputElement).value)}
         />
+        <datalist id="np-attr-${name}">
+          ${this._attributeKeys(tag.source).map(
+            (k) => html`<option value=${k}></option>`,
+          )}
+        </datalist>
       `;
     }
     if (tag.kind === "coil") {

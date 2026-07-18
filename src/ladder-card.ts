@@ -251,6 +251,28 @@ export class NotAPlcCard extends LitElement {
       font-size: 12px;
       text-anchor: middle;
     }
+    text.pin-l,
+    text.pin-r {
+      fill: var(--secondary-text-color);
+      font-size: 10px;
+    }
+    text.pin-l {
+      text-anchor: start;
+    }
+    text.pin-r {
+      text-anchor: end;
+    }
+    text.pin-v-l,
+    text.pin-v-r {
+      fill: var(--primary-text-color);
+      font-size: 11px;
+    }
+    text.pin-v-l {
+      text-anchor: end;
+    }
+    text.pin-v-r {
+      text-anchor: start;
+    }
     text.coil-mode.live {
       fill: var(--state-active-color, #4caf50);
       font-weight: 600;

@@ -19,7 +19,10 @@ export interface Measure {
 export function measureElement(el: Element): Measure {
   if (isContact(el)) return { cols: 1, rows: 1 };
   if (isCompare(el)) return { cols: 1, rows: 1 };
-  if (isFb(el)) return { cols: 1, rows: 1 };
+  // A function block is drawn as a TIA-style box with pins down both edges: two
+  // columns wide (room for the setting/value labels beside the pins) and two
+  // rows tall (the power pin on the baseline, parameter pins below).
+  if (isFb(el)) return { cols: 2, rows: 2 };
   if (isNot(el)) return { cols: 1, rows: 1 };
   let cols = 1;
   let rows = 0;

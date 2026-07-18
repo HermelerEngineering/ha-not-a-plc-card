@@ -35,6 +35,7 @@ import {
   isMove,
   isNot,
 } from "./ir";
+import { blockPinRows, fbBlock } from "./block";
 import { SlotTarget } from "./canvas";
 import { SeriesStep } from "./elements";
 import {
@@ -78,6 +79,8 @@ const SYMBOL_HALF = 9;
 export const RUNG_GAP = 12;
 /** Horizontal step between insert slots that would otherwise overlap (px). */
 const SLOT_SPREAD = 15;
+/** Vertical gap between a function block's stacked pins (px). */
+const PIN_GAP = 20;
 
 /** Pixel X of the left edge of grid column `col` within a rung. */
 function colX(col: number): number {
@@ -145,31 +148,74 @@ class RungPainter {
   ): DrawResult {
     const flow = this.flow.elements.get(el);
     const live = flow?.live ?? false;
-    const y = rowY(this.baseY, row);
+    const m = measureElement(el);
+    const y = rowY(this.baseY, row); // baseline = the power-pin row
     const left = colX(col);
-    const right = colX(col + 1);
-    const mid = (left + right) / 2;
-    const boxW = 66;
-    const boxH = 30;
-
-    this.line(left, y, mid - boxW / 2, y, powered);
-    this.line(mid + boxW / 2, y, right, y, live);
-
-    const cls = live ? "symbol live" : "symbol";
-    this.parts.push(
-      svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
-    );
-    // Instance name above, block type inside; counters also show CV/PV below.
+    const right = colX(col + m.cols);
+    const cx = (left + right) / 2;
     const def = this.fbs[el.instance];
-    this.label(mid, y - 22, el.instance, "tag");
-    this.label(mid, y + 4, def?.type ?? "FB", "fb-text");
-    const cv = fmtNumber(this.state[`${el.instance}.CV`]);
-    if (cv !== null) {
-      const pv = def && typeof def.pv === "number" ? def.pv : undefined;
-      // Below the box (its bottom is at y + boxH/2 = y + 15), not over the edge.
-      this.label(mid, y + 27, pv !== undefined ? `${cv}/${pv}` : cv, "compare-text");
+    const layout = fbBlock(el.instance, def, this.state);
+    const pinRows = blockPinRows(layout);
+    const cls = live ? "symbol live" : "symbol";
+
+    // Edges / power-only blocks: a compact box centred on the baseline, like NOT.
+    if (pinRows === 1) {
+      const boxW = 54;
+      const boxH = 30;
+      this.line(left, y, cx - boxW / 2, y, powered);
+      this.line(cx + boxW / 2, y, right, y, live);
+      this.parts.push(
+        svg`<rect x=${cx - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
+      );
+      this.label(cx, y - boxH / 2 - 4, el.instance, "tag");
+      this.label(cx, y + 4, layout.title, "fb-text");
+      return { endCol: col + m.cols, poweredOut: live };
     }
-    return { endCol: col + 1, poweredOut: live };
+
+    // TIA-style: a taller box with input pins left, output pins right. The power
+    // pins sit on the baseline (row 0); parameter pins stack below it.
+    const boxW = 60;
+    const boxLeft = cx - boxW / 2;
+    const boxRight = cx + boxW / 2;
+    const boxTop = y - 16;
+    const boxBottom = y + (pinRows - 1) * PIN_GAP + 12;
+
+    // Power in/out wires along the baseline.
+    this.line(left, y, boxLeft, y, powered);
+    this.line(boxRight, y, right, y, live);
+
+    this.parts.push(
+      svg`<rect x=${boxLeft} y=${boxTop} width=${boxW} height=${boxBottom - boxTop} rx="3" class=${cls} fill="none" />`,
+    );
+    // Instance name above the box, block type inside its top.
+    this.label(cx, boxTop - 4, el.instance, "tag");
+    this.label(cx, boxTop + 13, layout.title, "fb-text");
+
+    layout.ins.forEach((pin, i) => {
+      const py = y + i * PIN_GAP;
+      this.parts.push(
+        svg`<text x=${boxLeft + 5} y=${py + 4} class="pin-l">${pin.label}</text>`,
+      );
+      if (!pin.power && pin.value !== undefined) {
+        this.line(boxLeft - 12, py, boxLeft, py, false);
+        this.parts.push(
+          svg`<text x=${boxLeft - 14} y=${py + 4} class="pin-v-l">${pin.value}</text>`,
+        );
+      }
+    });
+    layout.outs.forEach((pin, i) => {
+      const py = y + i * PIN_GAP;
+      this.parts.push(
+        svg`<text x=${boxRight - 5} y=${py + 4} class="pin-r">${pin.label}</text>`,
+      );
+      if (!pin.power && pin.value !== undefined) {
+        this.line(boxRight, py, boxRight + 12, py, false);
+        this.parts.push(
+          svg`<text x=${boxRight + 14} y=${py + 4} class="pin-v-r">${pin.value}</text>`,
+        );
+      }
+    });
+    return { endCol: col + m.cols, poweredOut: live };
   }
 
   private drawCompare(

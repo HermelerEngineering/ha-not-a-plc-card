@@ -24,6 +24,8 @@ export interface TagDef {
   kind: TagKind;
   type?: TagType;
   source?: string;
+  /** For an input: read this state attribute instead of the entity state. */
+  attribute?: string;
   writes?: WritesBinding;
   retain?: boolean;
   on_unavailable?: "false" | "hold";

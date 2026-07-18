@@ -353,6 +353,14 @@ export class NotAPlcPanel extends LitElement {
     this._update(setTag(this._program, name, { ...tag, writes }));
   }
 
+  private _setAttribute(name: string, value: string): void {
+    if (!this._program) return;
+    const tag = this._program.tags[name];
+    this._update(
+      setTag(this._program, name, { ...tag, attribute: value.trim() || undefined }),
+    );
+  }
+
   private _setRetain(name: string, retain: boolean): void {
     if (!this._program) return;
     const tag = this._program.tags[name];
@@ -662,12 +670,22 @@ export class NotAPlcPanel extends LitElement {
 
   private _renderBinding(name: string, tag: TagDef): TemplateResult {
     if (tag.kind === "input") {
-      return this._entityPicker(
-        tag.source ?? "",
-        domainsForType(tag.type ?? "BOOL"),
-        "entity_id",
-        (v) => this._setSource(name, v),
-      );
+      return html`
+        ${this._entityPicker(
+          tag.source ?? "",
+          domainsForType(tag.type ?? "BOOL"),
+          "entity_id",
+          (v) => this._setSource(name, v),
+        )}
+        <input
+          class="attr-input"
+          .value=${tag.attribute ?? ""}
+          placeholder="attribute (optional)"
+          title="Read state.attributes[…] instead of the entity state"
+          @change=${(e: Event) =>
+            this._setAttribute(name, (e.target as HTMLInputElement).value)}
+        />
+      `;
     }
     if (tag.kind === "coil") {
       if ((tag.type ?? "BOOL") === "REAL") return this._renderRealWrite(name, tag);
@@ -2004,6 +2022,18 @@ export class NotAPlcPanel extends LitElement {
     input.entity-input {
       width: 100%;
       min-width: 160px;
+    }
+    input.attr-input {
+      width: 100%;
+      min-width: 160px;
+      margin-top: 4px;
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #ccc);
+      border-radius: 4px;
+      padding: 4px 6px;
+      box-sizing: border-box;
     }
     input.name-input {
       width: 100%;

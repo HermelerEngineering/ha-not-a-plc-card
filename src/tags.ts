@@ -103,6 +103,7 @@ function normaliseForKind(tag: TagDef, kind: TagKind): TagDef {
   const next: TagDef = { kind, type: tag.type ?? "BOOL" };
   if (kind === "input") {
     if (tag.source !== undefined) next.source = tag.source;
+    if (tag.attribute !== undefined) next.attribute = tag.attribute;
     next.on_unavailable = tag.on_unavailable ?? "false";
     if (tag.true_states !== undefined) next.true_states = tag.true_states;
   } else if (kind === "coil") {

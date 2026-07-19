@@ -552,10 +552,12 @@ export class NotAPlcPanel extends LitElement {
         <span class="status">${this._status}</span>
       </div>
       <div class="body">
-        <section class="edit-top">
-          ${this._renderValidation()}
+        <section class="define-block">
           ${this._renderTags()}
           ${this._renderFbs()}
+        </section>
+        <section class="toolbar-block">
+          ${this._renderValidation()}
           ${this._renderCanvasControls()}
         </section>
         <section class="canvas-scroll">
@@ -2177,10 +2179,12 @@ export class NotAPlcPanel extends LitElement {
       border-radius: 8px;
       padding: 12px;
     }
-    /* Pinned top region: validation, tag list, FB list, palette. It keeps its
-       natural height (never scrolls as a whole) so the palette/toolbar at its
-       bottom is always visible; the individual lists cap their own height. */
-    .edit-top {
+    /* Three stacked blocks: (1) tag/FB definition, (2) the toolbar, (3) the
+       scrolling canvas. The first two keep their natural height (pinned); the
+       lists inside block 1 cap their own height so block 2's palette stays
+       visible above the scrolling ladder. */
+    .define-block,
+    .toolbar-block {
       flex: 0 0 auto;
     }
     /* A long tag/FB list scrolls within its own capped area so it never pushes

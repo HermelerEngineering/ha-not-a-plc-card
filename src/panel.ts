@@ -594,23 +594,25 @@ export class NotAPlcPanel extends LitElement {
       </div>
       ${this._tagsOpen
         ? html`
-            <table class="tags">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Kind</th>
-                  <th>Type</th>
-                  <th>Binding</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
-              </tbody>
-            </table>
-            ${entries.length === 0
-              ? html`<div class="hint">No tags yet — add one.</div>`
-              : ""}
+            <div class="list-body">
+              <table class="tags">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Type</th>
+                    <th>Binding</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
+                </tbody>
+              </table>
+              ${entries.length === 0
+                ? html`<div class="hint">No tags yet — add one.</div>`
+                : ""}
+            </div>
           `
         : ""}
       ${this._datalists()}
@@ -861,13 +863,15 @@ export class NotAPlcPanel extends LitElement {
       </div>
       ${this._fbsOpen
         ? html`
-            ${entries.map(([name, def]) => this._renderFbRow(name, def))}
-            ${entries.length === 0
-              ? html`<div class="hint">
-                  No function blocks. Add one to use timers, counters, latches or
-                  edge detection in a rung.
-                </div>`
-              : ""}
+            <div class="list-body">
+              ${entries.map(([name, def]) => this._renderFbRow(name, def))}
+              ${entries.length === 0
+                ? html`<div class="hint">
+                    No function blocks. Add one to use timers, counters, latches
+                    or edge detection in a rung.
+                  </div>`
+                : ""}
+            </div>
           `
         : ""}
     `;
@@ -2173,11 +2177,16 @@ export class NotAPlcPanel extends LitElement {
       border-radius: 8px;
       padding: 12px;
     }
-    /* Pinned top region: validation, tag list, FB list, palette. Capped so a
-       huge (expanded) tag list scrolls internally instead of eating the canvas. */
+    /* Pinned top region: validation, tag list, FB list, palette. It keeps its
+       natural height (never scrolls as a whole) so the palette/toolbar at its
+       bottom is always visible; the individual lists cap their own height. */
     .edit-top {
-      flex: 0 1 auto;
-      max-height: 60%;
+      flex: 0 0 auto;
+    }
+    /* A long tag/FB list scrolls within its own capped area so it never pushes
+       the palette below the fold. */
+    .list-body {
+      max-height: 30vh;
       overflow-y: auto;
     }
     /* The ladder scrolls independently below the pinned controls. */

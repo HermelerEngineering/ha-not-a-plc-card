@@ -34,7 +34,7 @@ export const FB_TYPES = [
   ...LATCH_TYPES,
 ];
 
-export type FbFieldKind = "int" | "tag";
+export type FbFieldKind = "int" | "tag" | "duration";
 
 export interface FbField {
   key: string;
@@ -46,7 +46,8 @@ export interface FbField {
 /** The editable parameter fields for a function-block type. */
 export function fbFields(type: string): FbField[] {
   if (TIMER_TYPES.includes(type)) {
-    return [{ key: "preset_ms", kind: "int", label: "preset (ms)" }];
+    // Stored in ms; entered/shown as a duration (5s / 3m / 1h).
+    return [{ key: "preset_ms", kind: "duration", label: "preset" }];
   }
   if (type === "CTU") {
     return [

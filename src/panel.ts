@@ -46,6 +46,7 @@ import {
   withValue,
 } from "./actions";
 import { defineOnce } from "./define";
+import { formatDuration, parseDuration } from "./duration";
 import { HomeAssistant } from "./ha";
 import {
   BranchEl,
@@ -183,6 +184,12 @@ interface Tool {
   label: string;
   target: ToolTarget;
   make: () => Element | Output;
+  /**
+   * For a function-block tool: the block type to create. Placing such a tool
+   * auto-creates a fresh instance of this type (no pre-declaration needed), so
+   * `make` only returns a placeholder ref — `_elementFor` supplies the real one.
+   */
+  fbType?: string;
 }
 
 /** What the canvas has selected for the inspector. */
@@ -943,6 +950,31 @@ export class NotAPlcPanel extends LitElement {
     field: FbField,
   ): TemplateResult {
     const raw = def[field.key];
+    if (field.kind === "duration") {
+      const ms = typeof raw === "number" ? raw : undefined;
+      const shown = ms === undefined ? "" : formatDuration(ms);
+      return html`
+        <label class="fb-param">
+          ${field.label}
+          <input
+            class="dur-input"
+            .value=${shown}
+            placeholder="5s"
+            title="Duration — e.g. 500ms, 5s, 3m, 1h (a bare number means seconds)"
+            @change=${(e: Event) => {
+              const input = e.target as HTMLInputElement;
+              const parsed = parseDuration(input.value);
+              // Keep the previous value on a typo rather than clearing it.
+              if (parsed === undefined) {
+                input.value = shown;
+                return;
+              }
+              this._edit((p) => setFbParam(p, name, field.key, parsed));
+            }}
+          />
+        </label>
+      `;
+    }
     if (field.kind === "int") {
       return html`
         <label class="fb-param">
@@ -1560,14 +1592,19 @@ export class NotAPlcPanel extends LitElement {
       })),
       { label: "do", target: "coil", make: () => newAction() },
     ];
-    // The FB tool is always available: placing it auto-creates a fresh instance
-    // (configured in the popup), so no pre-declaration is needed. `make` returns
-    // a placeholder ref; `_elementFor` supplies the real instance on insert.
-    tools.splice(5, 0, {
-      label: "FB",
-      target: "element",
-      make: () => newFbRef(""),
-    });
+    // One tool per function-block type, so a TON/CTU/… can be dragged straight
+    // from the palette. Placing one auto-creates a fresh instance of that type
+    // (no pre-declaration needed) and opens its popup to set the parameters.
+    tools.splice(
+      5,
+      0,
+      ...FB_TYPES.map((type) => ({
+        label: type,
+        target: "element" as ToolTarget,
+        make: () => newFbRef(""),
+        fbType: type,
+      })),
+    );
     return tools;
   }
 
@@ -1583,8 +1620,8 @@ export class NotAPlcPanel extends LitElement {
     program: Program,
   ): { program: Program; el: Element } | null {
     if (tool.target !== "element") return null;
-    if (tool.label === "FB") {
-      const { program: next, name } = addFb(program);
+    if (tool.fbType) {
+      const { program: next, name } = addFb(program, tool.fbType);
       return { program: next, el: newFbRef(name) };
     }
     return { program, el: tool.make() as Element };
@@ -1615,7 +1652,7 @@ export class NotAPlcPanel extends LitElement {
     const tool = this._tool;
     if (!this._program || !tool) return;
     // A function block is only valid at the top level of a rung.
-    if (tool.label === "FB" && steps.length > 0) return;
+    if (tool.fbType && steps.length > 0) return;
     const made = this._elementFor(tool, this._program);
     if (!made) return;
     this._update(insertElementIn(made.program, ni, ri, steps, index, made.el));
@@ -1624,7 +1661,7 @@ export class NotAPlcPanel extends LitElement {
     // configured; other elements use the two-click open.
     this._tool = undefined;
     this._sel = { kind: "el", ni, ri, steps, ei: index };
-    this._modal = tool.label === "FB";
+    this._modal = !!tool.fbType;
   }
 
   private _placeCoil(ni: number, ri: number, index: number): void {
@@ -1649,7 +1686,7 @@ export class NotAPlcPanel extends LitElement {
     const pathIndex = branch && isBranch(branch) ? branch.branch.length : 0;
     // Seed the new path with the armed element — but not an FB (the model forbids
     // a function block inside a branch); for FB, add an empty path instead.
-    if (tool && tool.target === "element" && tool.label !== "FB") {
+    if (tool && tool.target === "element" && !tool.fbType) {
       this._update(addBranchPath(this._program, ni, ri, steps, ei, [tool.make() as Element]));
       this._tool = undefined;
       this._sel = {
@@ -1873,13 +1910,13 @@ export class NotAPlcPanel extends LitElement {
       this._modal = false;
     } else {
       // A function block is only valid at the top level of a rung.
-      if (tool.label === "FB" && steps.length > 0) return;
+      if (tool.fbType && steps.length > 0) return;
       const made = this._elementFor(tool, this._program);
       if (!made) return;
       this._update(insertElementIn(made.program, ni, ri, steps, index, made.el));
       this._sel = { kind: "el", ni, ri, steps, ei: index };
       // A dropped FB opens its popup to configure the new instance.
-      this._modal = tool.label === "FB";
+      this._modal = !!tool.fbType;
     }
   }
 
@@ -1911,8 +1948,10 @@ export class NotAPlcPanel extends LitElement {
         <span class="palette-label">Place:</span>
         ${this._tools().map(
           (t) => html`<button
-            class="chip draggable ${this._tool?.label === t.label ? "armed" : ""}
+            class="chip draggable ${t.fbType ? "fb" : ""}
+              ${this._tool?.label === t.label ? "armed" : ""}
               ${this._placeTool?.label === t.label ? "dragging" : ""}"
+            title=${t.fbType ? `Function block: ${t.fbType}` : t.label}
             @pointerdown=${(ev: PointerEvent) => this._chipPointerDown(t, ev)}
           >
             ${t.label}
@@ -1996,8 +2035,8 @@ export class NotAPlcPanel extends LitElement {
       // element drag, or a reorder drag (so it can land inside a branch) — but not
       // for the FB tool, since the model forbids a function block inside a branch.
       allowNestedInsert:
-        (this._tool?.target === "element" && this._tool?.label !== "FB") ||
-        (this._placeTool?.target === "element" && this._placeTool?.label !== "FB") ||
+        (this._tool?.target === "element" && !this._tool?.fbType) ||
+        (this._placeTool?.target === "element" && !this._placeTool?.fbType) ||
         reordering,
       onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
       onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
@@ -2613,6 +2652,11 @@ export class NotAPlcPanel extends LitElement {
     button.chip.draggable {
       cursor: grab;
       touch-action: none;
+    }
+    /* Function-block chips carry longer labels (R_TRIG, F_TRIG) — shrink to fit. */
+    .palette button.chip.fb {
+      font-size: 10px;
+      letter-spacing: -0.2px;
     }
     button.chip.dragging {
       cursor: grabbing;

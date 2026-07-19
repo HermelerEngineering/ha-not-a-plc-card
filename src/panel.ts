@@ -33,14 +33,7 @@
  *   - keeps a lossless DSL text editor as an escape hatch (`save_program_text`).
  */
 
-import {
-  LitElement,
-  SVGTemplateResult,
-  TemplateResult,
-  css,
-  html,
-  svg,
-} from "lit";
+import { LitElement, TemplateResult, css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 
 import {
@@ -152,6 +145,15 @@ import {
 const VIEW_WIDTH = 760;
 
 const TAG_KINDS: TagKind[] = ["input", "coil", "memory", "temp"];
+// Display labels for the tag-kind picker. The IR kind stays `coil`, but in the
+// tag list "output" reads better since such a tag can also be REAL (not only a
+// boolean coil). This relabel is scoped to the tag list only.
+const TAG_KIND_LABELS: Record<TagKind, string> = {
+  input: "input",
+  coil: "output",
+  memory: "memory",
+  temp: "temp",
+};
 const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];
 const COIL_MODES: CoilMode[] = ["=", "S", "R"];
 const CONTACT_MODES: ContactMode[] = ["NO", "NC"];
@@ -215,6 +217,9 @@ export class NotAPlcPanel extends LitElement {
   @state() private _loaded = false;
   @state() private _tool?: Tool;
   @state() private _sel?: Selection;
+  /** Collapse state of the (space-hungry) tag and function-block lists. */
+  @state() private _tagsOpen = true;
+  @state() private _fbsOpen = true;
   /** Whether the parameter popup is open (second click of the selection). */
   @state() private _modal = false;
   /**
@@ -538,15 +543,14 @@ export class NotAPlcPanel extends LitElement {
         <span class="status">${this._status}</span>
       </div>
       <div class="body">
-        <section class="preview">${this._renderPreview()}</section>
-        <section class="edit">
+        <section class="edit-top">
           ${this._renderValidation()}
           ${this._renderTags()}
           ${this._renderFbs()}
-          <details open>
-            <summary>Canvas editor (click-to-place)</summary>
-            ${this._renderCanvas()}
-          </details>
+          ${this._renderCanvasControls()}
+        </section>
+        <section class="canvas-scroll">
+          ${this._renderCanvasNetworks()}
           <details>
             <summary>Structure editor (forms)</summary>
             ${this._renderStructure()}
@@ -557,6 +561,7 @@ export class NotAPlcPanel extends LitElement {
             <button @click=${this._saveText}>Save text</button>
           </details>
         </section>
+        ${this._renderInspector()}
       </div>
     `;
   }
@@ -566,28 +571,38 @@ export class NotAPlcPanel extends LitElement {
     const entries = Object.entries(this._program.tags);
     return html`
       <div class="tags-header">
-        <h3>Tags</h3>
+        <button
+          class="collapse"
+          @click=${() => (this._tagsOpen = !this._tagsOpen)}
+        >
+          <span class="chevron">${this._tagsOpen ? "▾" : "▸"}</span>
+          Tags <span class="count">${entries.length}</span>
+        </button>
         <div class="tags-actions">
           <button class="secondary" @click=${this._addTag}>+ Add tag</button>
           <button @click=${this._saveProgram}>Save</button>
         </div>
       </div>
-      <table class="tags">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Kind</th>
-            <th>Type</th>
-            <th>Binding</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
-        </tbody>
-      </table>
-      ${entries.length === 0
-        ? html`<div class="hint">No tags yet — add one.</div>`
+      ${this._tagsOpen
+        ? html`
+            <table class="tags">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Kind</th>
+                  <th>Type</th>
+                  <th>Binding</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${entries.map(([name, tag]) => this._renderTagRow(name, tag))}
+              </tbody>
+            </table>
+            ${entries.length === 0
+              ? html`<div class="hint">No tags yet — add one.</div>`
+              : ""}
+          `
         : ""}
       ${this._datalists()}
     `;
@@ -612,7 +627,10 @@ export class NotAPlcPanel extends LitElement {
               this._setKind(name, (e.target as HTMLSelectElement).value as TagKind)}
           >
             ${TAG_KINDS.map(
-              (k) => html`<option value=${k} ?selected=${k === tag.kind}>${k}</option>`,
+              (k) =>
+                html`<option value=${k} ?selected=${k === tag.kind}>
+                  ${TAG_KIND_LABELS[k]}
+                </option>`,
             )}
           </select>
         </td>
@@ -823,15 +841,25 @@ export class NotAPlcPanel extends LitElement {
     const entries = Object.entries(this._program.fbs ?? {});
     return html`
       <div class="tags-header">
-        <h3>Function blocks</h3>
+        <button
+          class="collapse"
+          @click=${() => (this._fbsOpen = !this._fbsOpen)}
+        >
+          <span class="chevron">${this._fbsOpen ? "▾" : "▸"}</span>
+          Function blocks <span class="count">${entries.length}</span>
+        </button>
         <button class="secondary" @click=${this._addFb}>+ Block</button>
       </div>
-      ${entries.map(([name, def]) => this._renderFbRow(name, def))}
-      ${entries.length === 0
-        ? html`<div class="hint">
-            No function blocks. Add one to use timers, counters, latches or edge
-            detection in a rung.
-          </div>`
+      ${this._fbsOpen
+        ? html`
+            ${entries.map(([name, def]) => this._renderFbRow(name, def))}
+            ${entries.length === 0
+              ? html`<div class="hint">
+                  No function blocks. Add one to use timers, counters, latches or
+                  edge detection in a rung.
+                </div>`
+              : ""}
+          `
         : ""}
     `;
   }
@@ -1777,9 +1805,8 @@ export class NotAPlcPanel extends LitElement {
     this._modal = false;
   }
 
-  private _renderCanvas(): TemplateResult {
-    // Rebuilt from scratch by the renderer's onGeometry callbacks below.
-    this._geom = new Map();
+  /** The pinned canvas controls: title + actions, the palette, and the hint. */
+  private _renderCanvasControls(): TemplateResult {
     if (!this._program) return html``;
     return html`
       <div class="tags-header">
@@ -1816,8 +1843,16 @@ export class NotAPlcPanel extends LitElement {
             ? `Drag a tool onto the ladder, or click a ＋ slot to place “${this._tool.label}”.`
             : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to reorder."}
       </div>
+    `;
+  }
+
+  /** The scrollable ladder itself (one SVG per network). */
+  private _renderCanvasNetworks(): TemplateResult {
+    // Rebuilt from scratch by the renderer's onGeometry callbacks each render.
+    this._geom = new Map();
+    if (!this._program) return html``;
+    return html`
       ${this._program.networks.map((net, ni) => this._renderCanvasNetwork(net, ni))}
-      ${this._renderInspector()}
     `;
   }
 
@@ -2063,35 +2098,16 @@ export class NotAPlcPanel extends LitElement {
     `;
   }
 
-  private _renderPreview(): TemplateResult {
-    if (!this._program) return html`<div class="hint">Loading…</div>`;
-    if (this._program.networks.length === 0) {
-      return html`<div class="hint">This program has no networks.</div>`;
-    }
-    const flow = computePowerFlow(this._program, this._stateImage);
-    const fbs = this._program.fbs ?? {};
-    const groups: SVGTemplateResult[] = [];
-    let y = 0;
-    for (const network of this._program.networks) {
-      const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbs, this._stateImage);
-      groups.push(svg`<g transform="translate(0, ${y})">${rendered.part}</g>`);
-      y += rendered.height;
-    }
-    return html`
-      <svg viewBox="0 0 ${VIEW_WIDTH} ${y}" width="100%" role="img">
-        ${groups}
-      </svg>
-    `;
-  }
-
   static styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       height: 100%;
       background: var(--primary-background-color);
       color: var(--primary-text-color);
     }
     .topbar {
+      flex: 0 0 auto;
       display: flex;
       align-items: center;
       gap: 12px;
@@ -2123,27 +2139,60 @@ export class NotAPlcPanel extends LitElement {
       max-width: 240px;
     }
     .body {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
       padding: 16px;
-      align-items: start;
-    }
-    @media (max-width: 900px) {
-      .body {
-        grid-template-columns: 1fr;
-      }
+      overflow: hidden;
     }
     section {
       background: var(--card-background-color, #fff);
       border-radius: 8px;
       padding: 12px;
-      overflow-x: auto;
+    }
+    /* Pinned top region: validation, tag list, FB list, palette. Capped so a
+       huge (expanded) tag list scrolls internally instead of eating the canvas. */
+    .edit-top {
+      flex: 0 1 auto;
+      max-height: 60%;
+      overflow-y: auto;
+    }
+    /* The ladder scrolls independently below the pinned controls. */
+    .canvas-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
     }
     .tags-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
+    }
+    /* A section heading that toggles its list open/closed. */
+    button.collapse {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: none;
+      border: none;
+      padding: 4px 0;
+      margin: 0;
+      font-size: 1.05em;
+      font-weight: 500;
+      color: var(--primary-text-color);
+      cursor: pointer;
+    }
+    button.collapse .chevron {
+      width: 1em;
+      color: var(--secondary-text-color);
+    }
+    button.collapse .count {
+      color: var(--secondary-text-color);
+      font-weight: 400;
+      font-size: 0.85em;
     }
     .tags-actions {
       display: flex;

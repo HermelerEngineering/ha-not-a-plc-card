@@ -1,31 +1,35 @@
-# Not-a-PLC — status card
+# Not-a-PLC — editor panel & status card
 
-A read-only [Lovelace](https://www.home-assistant.io/dashboards/) card for the
-[**Not-a-PLC**](https://github.com/HermelerEngineering/ha-not-a-plc) integration.
-It draws your ladder program and colours the "energised" contacts, wires and
-coils live, so you get the classic PLC *online monitoring* feel on a Home
-Assistant dashboard.
+The frontend for [**Not-a-PLC**](https://github.com/HermelerEngineering/ha-not-a-plc):
+a full-page **graphical editor** for building ladder programs, plus a read-only
+**status card** for your dashboards.
 
-It is purely a monitor — it never writes. Actuation stays in the integration.
+**Not-a-PLC is not a PLC — and you do not need one.** No industrial hardware, no
+Modbus, no external runtime. It is a different **way of programming your
+automations** inside Home Assistant: a cyclic scan that reads your entities,
+solves a ladder program, and writes the results back as real HA entities. If you
+have written ladder logic before, this will feel familiar; if not, it is a very
+visual way to express "when these conditions hold, do this".
 
-## How it works
+## Status: beta
 
-The card talks to the integration over two websocket commands:
+In **beta testing** — usable day to day, but expect rough edges and occasional
+breaking changes while things settle. Feedback is very welcome.
 
-- `not_a_plc/get_program` — fetched once, to draw the rungs from the canonical IR.
-- `not_a_plc/subscribe_state` — the process image (inputs, memory bits and coils)
-  pushed after every scan; each update recolours the SVG.
+## You need both parts
 
-The "what is energised" decision is a pure function of `(program, state)`
-([`src/power-flow.ts`](src/power-flow.ts)), kept free of any DOM so it is
-unit-tested in isolation.
+This repository is only the frontend. It does nothing on its own — the logic
+engine lives in the integration:
 
-## Requirements
+| Part | Repository | HACS category |
+|------|-----------|---------------|
+| **Integration** | [`ha-not-a-plc`](https://github.com/HermelerEngineering/ha-not-a-plc) | Integration |
+| **Card / editor** | [`ha-not-a-plc-card`](https://github.com/HermelerEngineering/ha-not-a-plc-card) (this repo) | Dashboard |
 
-- The **Not-a-PLC** integration installed and set up (it exposes the websocket
-  API this card consumes).
+Install **both**, then create your first service and program as described in the
+[integration README](https://github.com/HermelerEngineering/ha-not-a-plc#creating-a-program).
 
-## Installation via HACS (custom repository)
+## Install via HACS (custom repository)
 
 1. In Home Assistant: **HACS → ⋮ (top right) → Custom repositories**.
 2. Repository: `https://github.com/HermelerEngineering/ha-not-a-plc-card`
@@ -33,22 +37,60 @@ unit-tested in isolation.
 3. Open the new **Not-a-PLC Card** entry and **Download** it. HACS fetches the
    built `not-a-plc-card.js` from the latest release and registers the dashboard
    resource for you.
-4. Add a card of type `custom:not-a-plc-card` to a dashboard:
+4. **Restart Home Assistant** (or reload the page) so the resource loads.
+
+## The editor panel
+
+Once installed, **Not-a-PLC** appears in the Home Assistant sidebar (admin only).
+That page is where you actually build and change programs — define tags, drag
+elements onto the ladder, configure timers and counters, and press **Save**.
+
+The editor canvas is live: it is coloured in real time as the program runs, so you
+edit and monitor in the same view. See the
+[integration README](https://github.com/HermelerEngineering/ha-not-a-plc#editing-a-program)
+for a walkthrough of the editor.
+
+## Adding the status card to a dashboard
+
+The card is a **read-only, visual view of the program's status**. It never writes
+anything and cannot change your program — it is purely for watching the logic run
+on a dashboard. All editing happens in the sidebar panel described above.
+
+1. Open the dashboard you want it on and choose **Edit dashboard**.
+2. **+ Add card**, then search for **Not-a-PLC** (or pick *Manual* and use the YAML
+   below).
+3. In the card editor, pick which **Service** to show from the dropdown — this is
+   the Not-a-PLC service (config entry) whose program you want to watch. Leave it
+   alone if you only have one.
+4. **Save**.
+
+YAML equivalent, if you prefer:
 
 ```yaml
 type: custom:not-a-plc-card
 title: Ventilation logic
 # Optional: which Not-a-PLC service to show. Omit to use the first one.
-# Pick it visually in the card editor; this is the service's config entry id.
+# Easiest picked visually in the card editor; this is the service's config entry id.
 service: 1a2b3c...
 ```
 
-If you run several Not-a-PLC services, choose which one a card shows in the card
-editor's **Service** dropdown (no YAML needed). The heartbeat dot (top-right)
-blinks at the service's scan interval.
+The card draws the rungs and colours energised contacts, wires and coils live, so
+you get the classic *online monitoring* feel. The heartbeat dot (top-right) blinks
+at the service's scan interval, so you can see the engine is running.
 
-HACS installs the file attached to a GitHub **release** (built by the release
-workflow), so make sure the repository has at least one release — see below.
+## How it works
+
+The frontend talks to the integration over websocket commands:
+
+- `not_a_plc/get_program` — the canonical program (the "IR"), used to draw the rungs.
+- `not_a_plc/subscribe_state` — the process image (inputs, memory bits, coils)
+  pushed after each scan; every update recolours the SVG.
+- `not_a_plc/save_program` — used by the editor panel only.
+
+The "what is energised" decision is a pure function of `(program, state)`
+([`src/power-flow.ts`](src/power-flow.ts)), kept free of any DOM so it is
+unit-tested in isolation. The same render layer draws both the read-only card and
+the editor canvas.
 
 ## Installation (manual, during development)
 
@@ -56,18 +98,6 @@ workflow), so make sure the repository has at least one release — see below.
 2. Copy that file to `config/www/not-a-plc-card.js` in Home Assistant.
 3. Add it as a dashboard resource (Settings → Dashboards → Resources) as a
    JavaScript module: `/local/not-a-plc-card.js`.
-4. Add a card of type `custom:not-a-plc-card` to a dashboard (as above).
-
-## Cutting a release
-
-The bundle is not committed; it is built on demand. Pushing a version tag runs
-the release workflow, which builds `not-a-plc-card.js` and attaches it to the
-GitHub release HACS installs from:
-
-```bash
-git tag v0.0.1
-git push origin v0.0.1
-```
 
 ## Development
 
@@ -75,11 +105,21 @@ git push origin v0.0.1
 npm install
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint
-npm test            # vitest (pure power-flow tests)
+npm test            # vitest (pure logic: power-flow, elements, layout, validation, …)
 npm run build       # vite library build -> dist/
 ```
 
-## Status
+The bundle is not committed; it is built on demand. Pushing a version tag runs the
+release workflow, which builds `not-a-plc-card.js` and attaches it to the GitHub
+release HACS installs from:
 
-Phase 2 of the project: read-only status view. The editable variant (phase 4)
-reuses this render layer. See the integration repo's `docs/project-plan.md`.
+```bash
+git tag v0.34.0
+git push origin v0.34.0
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE). You may use, modify and redistribute this freely,
+including commercially; the only condition is that the copyright notice and
+licence text travel with copies. It comes with no warranty.

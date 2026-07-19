@@ -4,7 +4,7 @@
   "description": "Read-only Lovelace card that shows a Not-a-PLC ladder program flowing live.",
   "type": "module",
   "license": "MIT",
-  "author": "Ron Hermeler",
+  "author": "Hermeler Engineering",
   "repository": {
     "type": "git",
     "url": "https://github.com/HermelerEngineering/ha-not-a-plc-card"

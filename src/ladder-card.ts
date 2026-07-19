@@ -148,15 +148,18 @@ export class NotAPlcCard extends LitElement {
     const fbs = this._program.fbs ?? {};
     const groups: SVGTemplateResult[] = [];
     let y = 0;
+    // Grow the viewBox to the widest network so a long rung is not clipped.
+    let viewWidth = VIEW_WIDTH;
     for (const network of this._program.networks) {
       const rendered = renderNetwork(network, flow, VIEW_WIDTH, fbs, this._stateImage);
       groups.push(svg`<g transform="translate(0, ${y})">${rendered.part}</g>`);
       y += rendered.height;
+      viewWidth = Math.max(viewWidth, rendered.width);
     }
 
     return html`
       <svg
-        viewBox="0 0 ${VIEW_WIDTH} ${y}"
+        viewBox="0 0 ${viewWidth} ${y}"
         width="100%"
         preserveAspectRatio="xMidYMin meet"
         role="img"

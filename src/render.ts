@@ -804,6 +804,22 @@ function renderRung(
 export interface RenderedNetwork {
   part: SVGTemplateResult;
   height: number;
+  /**
+   * The user-space width the network actually needs. This is the requested
+   * `width` for normal networks (so the output column keeps its usual place),
+   * but grows for a rung whose series is too long to fit — otherwise that rung's
+   * output column would be drawn outside the viewBox and get clipped.
+   */
+  width: number;
+}
+
+/** The width a rung needs: its series, the stub, and room for its output. */
+function rungRequiredWidth(rung: Rung): number {
+  const hasOutputBlock = rung.coils.some(
+    (o) => isMove(o) || isCalc(o) || isAction(o),
+  );
+  const rightSpace = hasOutputBlock ? OUTPUT_BLOCK_SPACE : 120;
+  return colX(measureSeries(rung.series).cols) + 24 + rightSpace;
 }
 
 export function renderNetwork(
@@ -815,14 +831,20 @@ export function renderNetwork(
   edit?: CanvasEdit,
 ): RenderedNetwork {
   const parts: SVGTemplateResult[] = [];
+  // Grow to the widest rung so nothing is clipped; never shrink below `width`,
+  // so small networks keep their output column on the usual line.
+  const contentWidth = network.rungs.reduce(
+    (w, rung) => Math.max(w, rungRequiredWidth(rung)),
+    width,
+  );
   let y = TITLE_H;
   if (network.title) {
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
   network.rungs.forEach((rung, ri) => {
-    const r = renderRung(rung, y, flow, width, fbs, state, edit, ri);
+    const r = renderRung(rung, y, flow, contentWidth, fbs, state, edit, ri);
     parts.push(r.part);
     y += r.height + RUNG_GAP;
   });
-  return { part: svg`<g>${parts}</g>`, height: y + PAD };
+  return { part: svg`<g>${parts}</g>`, height: y + PAD, width: contentWidth };
 }

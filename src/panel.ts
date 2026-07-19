@@ -2044,8 +2044,8 @@ export class NotAPlcPanel extends LitElement {
         <svg
           class="cv-svg ${this._tool || this._placeTool ? "arming" : ""}"
           data-ni=${ni}
-          viewBox="0 0 ${VIEW_WIDTH} ${rendered.height}"
-          width=${VIEW_WIDTH * this._zoom}
+          viewBox="0 0 ${rendered.width} ${rendered.height}"
+          width=${rendered.width * this._zoom}
           height=${rendered.height * this._zoom}
           role="img"
         >

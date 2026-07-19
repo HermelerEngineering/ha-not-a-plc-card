@@ -866,11 +866,24 @@ export class NotAPlcPanel extends LitElement {
       ${this._fbsOpen
         ? html`
             <div class="list-body">
-              ${entries.map(([name, def]) => this._renderFbRow(name, def))}
+              <table class="tags">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Parameters</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${entries.map(([name, def]) => this._renderFbRow(name, def))}
+                </tbody>
+              </table>
               ${entries.length === 0
                 ? html`<div class="hint">
                     No function blocks. Add one to use timers, counters, latches
-                    or edge detection in a rung.
+                    or edge detection in a rung — or just drag the FB tool onto a
+                    rung and configure it there.
                   </div>`
                 : ""}
             </div>
@@ -880,35 +893,47 @@ export class NotAPlcPanel extends LitElement {
   }
 
   private _renderFbRow(name: string, def: FunctionBlockDef): TemplateResult {
+    const fields = fbFields(def.type);
     return html`
-      <div class="fb-row">
-        <input
-          class="name-input"
-          .value=${name}
-          @change=${(e: Event) =>
-            this._renameFb(name, (e.target as HTMLInputElement).value)}
-        />
-        <select
-          .value=${def.type}
-          @change=${(e: Event) =>
-            this._edit((p) =>
-              setFbType(p, name, (e.target as HTMLSelectElement).value),
+      <tr>
+        <td>
+          <input
+            class="name-input"
+            .value=${name}
+            @change=${(e: Event) =>
+              this._renameFb(name, (e.target as HTMLInputElement).value)}
+          />
+        </td>
+        <td>
+          <select
+            .value=${def.type}
+            @change=${(e: Event) =>
+              this._edit((p) =>
+                setFbType(p, name, (e.target as HTMLSelectElement).value),
+              )}
+          >
+            ${FB_TYPES.map(
+              (t) => html`<option value=${t} ?selected=${t === def.type}>${t}</option>`,
             )}
-        >
-          ${FB_TYPES.map(
-            (t) => html`<option value=${t} ?selected=${t === def.type}>${t}</option>`,
-          )}
-        </select>
-        ${fbFields(def.type).map((field) => this._renderFbParam(name, def, field))}
-        <span class="spacer"></span>
-        <button
-          class="icon"
-          title="Delete block"
-          @click=${() => this._removeFb(name)}
-        >
-          ✕
-        </button>
-      </div>
+          </select>
+        </td>
+        <td>
+          <div class="fb-params">
+            ${fields.length === 0
+              ? html`<span class="muted">—</span>`
+              : fields.map((field) => this._renderFbParam(name, def, field))}
+          </div>
+        </td>
+        <td>
+          <button
+            class="icon"
+            title="Delete block"
+            @click=${() => this._removeFb(name)}
+          >
+            ✕
+          </button>
+        </td>
+      </tr>
     `;
   }
 
@@ -1106,13 +1131,20 @@ export class NotAPlcPanel extends LitElement {
         <button class="chip" @click=${() => add(newCompare())}>+ Compare</button>
         <button class="chip" @click=${() => add(newBranch())}>+ Branch</button>
         <button class="chip" @click=${() => add(newNot())}>+ NOT</button>
-        ${steps.length === 0 && this._fbNames().length
-          ? html`<button class="chip" @click=${() => add(newFbRef(this._fbNames()[0]))}>
+        ${steps.length === 0
+          ? html`<button class="chip" @click=${() => this._addFbElement(ni, ri, steps)}>
               + FB
             </button>`
           : ""}
       </div>
     `;
+  }
+
+  /** Add a fresh fb instance and an `fb` element referencing it (top level). */
+  private _addFbElement(ni: number, ri: number, steps: SeriesStep[]): void {
+    if (!this._program) return;
+    const { program, name } = addFb(this._program);
+    this._update(addElementIn(program, ni, ri, steps, newFbRef(name)));
   }
 
   private _elActions(
@@ -1528,15 +1560,34 @@ export class NotAPlcPanel extends LitElement {
       })),
       { label: "do", target: "coil", make: () => newAction() },
     ];
-    const fb = this._fbNames()[0];
-    if (fb) {
-      tools.splice(5, 0, {
-        label: "FB",
-        target: "element",
-        make: () => newFbRef(fb),
-      });
-    }
+    // The FB tool is always available: placing it auto-creates a fresh instance
+    // (configured in the popup), so no pre-declaration is needed. `make` returns
+    // a placeholder ref; `_elementFor` supplies the real instance on insert.
+    tools.splice(5, 0, {
+      label: "FB",
+      target: "element",
+      make: () => newFbRef(""),
+    });
     return tools;
+  }
+
+  /**
+   * The element to insert for an armed element tool, plus the program it must be
+   * inserted into. For the FB tool this auto-creates a fresh instance (default
+   * type) — so an fb can be placed without pre-declaring — and returns a ref to
+   * it; its type/params are then configured in the popup. Returns null for a
+   * non-element tool.
+   */
+  private _elementFor(
+    tool: Tool,
+    program: Program,
+  ): { program: Program; el: Element } | null {
+    if (tool.target !== "element") return null;
+    if (tool.label === "FB") {
+      const { program: next, name } = addFb(program);
+      return { program: next, el: newFbRef(name) };
+    }
+    return { program, el: tool.make() as Element };
   }
 
   private _armTool(tool?: Tool): void {
@@ -1562,14 +1613,18 @@ export class NotAPlcPanel extends LitElement {
 
   private _placeElement(ni: number, ri: number, steps: SeriesStep[], index: number): void {
     const tool = this._tool;
-    if (!this._program || tool?.target !== "element") return;
-    const el = tool.make() as Element;
-    this._update(insertElementIn(this._program, ni, ri, steps, index, el));
-    // Place-then-select: drop the tool and select the new element (no popup yet;
-    // click it again to open the parameter popup).
+    if (!this._program || !tool) return;
+    // A function block is only valid at the top level of a rung.
+    if (tool.label === "FB" && steps.length > 0) return;
+    const made = this._elementFor(tool, this._program);
+    if (!made) return;
+    this._update(insertElementIn(made.program, ni, ri, steps, index, made.el));
+    // Place-then-select: drop the tool and select the new element. A freshly-
+    // placed FB opens its popup straight away so the new instance can be
+    // configured; other elements use the two-click open.
     this._tool = undefined;
     this._sel = { kind: "el", ni, ri, steps, ei: index };
-    this._modal = false;
+    this._modal = tool.label === "FB";
   }
 
   private _placeCoil(ni: number, ri: number, index: number): void {
@@ -1592,7 +1647,9 @@ export class NotAPlcPanel extends LitElement {
     const tool = this._tool;
     const branch = this._elementAt(ni, ri, steps, ei);
     const pathIndex = branch && isBranch(branch) ? branch.branch.length : 0;
-    if (tool && tool.target === "element") {
+    // Seed the new path with the armed element — but not an FB (the model forbids
+    // a function block inside a branch); for FB, add an empty path instead.
+    if (tool && tool.target === "element" && tool.label !== "FB") {
       this._update(addBranchPath(this._program, ni, ri, steps, ei, [tool.make() as Element]));
       this._tool = undefined;
       this._sel = {
@@ -1813,11 +1870,17 @@ export class NotAPlcPanel extends LitElement {
       const at = Math.min(index, coils);
       this._update(insertCoil(this._program, ni, ri, at, tool.make() as Output));
       this._sel = { kind: "coil", ni, ri, ci: at };
+      this._modal = false;
     } else {
-      this._update(insertElementIn(this._program, ni, ri, steps, index, tool.make() as Element));
+      // A function block is only valid at the top level of a rung.
+      if (tool.label === "FB" && steps.length > 0) return;
+      const made = this._elementFor(tool, this._program);
+      if (!made) return;
+      this._update(insertElementIn(made.program, ni, ri, steps, index, made.el));
       this._sel = { kind: "el", ni, ri, steps, ei: index };
+      // A dropped FB opens its popup to configure the new instance.
+      this._modal = tool.label === "FB";
     }
-    this._modal = false;
   }
 
   /** The pinned canvas controls: title + actions, the palette, and the hint. */
@@ -1930,10 +1993,11 @@ export class NotAPlcPanel extends LitElement {
       errorEls,
       errorCoils,
       // Show nested insert slots for a persistently armed element tool, a palette
-      // element drag, or a reorder drag (so it can land inside a branch).
+      // element drag, or a reorder drag (so it can land inside a branch) — but not
+      // for the FB tool, since the model forbids a function block inside a branch.
       allowNestedInsert:
-        this._tool?.target === "element" ||
-        this._placeTool?.target === "element" ||
+        (this._tool?.target === "element" && this._tool?.label !== "FB") ||
+        (this._placeTool?.target === "element" && this._placeTool?.label !== "FB") ||
         reordering,
       onInsertElement: (ri, steps, index) => this._placeElement(ni, ri, steps, index),
       onSelectElement: (ri, steps, ei) => this._selectEl(ni, ri, steps, ei),
@@ -2072,7 +2136,7 @@ export class NotAPlcPanel extends LitElement {
     return html`
       <div class="modal-section">
         <div class="col-label">Block parameters</div>
-        <div class="fb-row">
+        <div class="fb-params">
           <label class="fb-param">
             type
             <select
@@ -2446,15 +2510,14 @@ export class NotAPlcPanel extends LitElement {
       padding: 3px 10px;
       font-size: 0.85em;
     }
-    .fb-row {
+    .fb-params {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 0;
       flex-wrap: wrap;
     }
-    .fb-row select,
-    .fb-row input {
+    .fb-params select,
+    .fb-params input {
       font: inherit;
       color: var(--primary-text-color);
       background: var(--card-background-color, #fff);

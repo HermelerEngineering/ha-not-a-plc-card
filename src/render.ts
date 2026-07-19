@@ -842,7 +842,11 @@ export function renderNetwork(
     width,
   );
   let y = TITLE_H;
-  if (network.title) {
+  // The editor shows the network title in its own header (next to the id chip),
+  // so drawing it here as well would duplicate it. The read-only card has no
+  // header, so there it is drawn. The top padding is reserved either way, so the
+  // rung geometry is identical in both.
+  if (network.title && !edit) {
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
   network.rungs.forEach((rung, ri) => {

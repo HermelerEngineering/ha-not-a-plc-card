@@ -2076,8 +2076,7 @@ export class NotAPlcPanel extends LitElement {
       <div class="cv-net">
         <div class="cv-net-head">
           <span class="chip-id">${net.id}</span>
-          <!-- The network title is drawn inside the SVG (as it is on the card),
-               so it is deliberately not repeated here. -->
+          ${net.title ? html`<span class="net-title">${net.title}</span>` : ""}
           <span class="spacer"></span>
           <button class="secondary small" @click=${() => this._edit((p) => addRung(p, ni))}>
             + Rung
@@ -2459,6 +2458,10 @@ export class NotAPlcPanel extends LitElement {
       background: var(--secondary-background-color, #eee);
       border-radius: 4px;
       padding: 1px 6px;
+    }
+    /* Network name, shown next to the id chip (the SVG omits it in the editor). */
+    .net-title {
+      font-weight: 600;
     }
     .spacer {
       flex: 1;

@@ -157,6 +157,13 @@ const TAG_KIND_LABELS: Record<TagKind, string> = {
 const TAG_TYPES: TagType[] = ["BOOL", "REAL", "TIME"];
 const COIL_MODES: CoilMode[] = ["=", "S", "R"];
 const CONTACT_MODES: ContactMode[] = ["NO", "NC"];
+// Canvas zoom presets: a factor that multiplies the ladder's on-screen size, so
+// large networks can be scaled down to fit (or up for readability).
+const ZOOM_PRESETS: { label: string; factor: number }[] = [
+  { label: "Small", factor: 0.7 },
+  { label: "Medium", factor: 1 },
+  { label: "Large", factor: 1.4 },
+];
 const COMPARE_OPS: CompareOp[] = ["GT", "GE", "LT", "LE", "EQ", "NE"];
 const CALC_OPS: CalcOp[] = ["ADD", "SUB", "MUL", "DIV"];
 const CALC_SYMBOL: Record<CalcOp, string> = {
@@ -220,6 +227,8 @@ export class NotAPlcPanel extends LitElement {
   /** Collapse state of the (space-hungry) tag and function-block lists. */
   @state() private _tagsOpen = true;
   @state() private _fbsOpen = true;
+  /** Canvas zoom factor (multiplies the SVG's on-screen size). */
+  @state() private _zoom = 1;
   /** Whether the parameter popup is open (second click of the selection). */
   @state() private _modal = false;
   /**
@@ -1812,6 +1821,17 @@ export class NotAPlcPanel extends LitElement {
       <div class="tags-header">
         <h3>Canvas <span class="beta">beta</span></h3>
         <div class="tags-actions">
+          <div class="zoom" role="group" aria-label="Canvas zoom">
+            <span class="palette-label">Zoom:</span>
+            ${ZOOM_PRESETS.map(
+              (z) => html`<button
+                class="seg ${this._zoom === z.factor ? "armed" : ""}"
+                @click=${() => (this._zoom = z.factor)}
+              >
+                ${z.label}
+              </button>`,
+            )}
+          </div>
           <button class="secondary" @click=${() => this._edit(addNetwork)}>
             + Network
           </button>
@@ -1955,7 +1975,8 @@ export class NotAPlcPanel extends LitElement {
           class="cv-svg ${this._tool || this._placeTool ? "arming" : ""}"
           data-ni=${ni}
           viewBox="0 0 ${VIEW_WIDTH} ${rendered.height}"
-          width="100%"
+          width=${VIEW_WIDTH * this._zoom}
+          height=${rendered.height * this._zoom}
           role="img"
         >
           ${rendered.part}
@@ -2483,6 +2504,20 @@ export class NotAPlcPanel extends LitElement {
     .palette-label {
       font-size: 0.8em;
       color: var(--secondary-text-color);
+    }
+    .zoom {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .zoom button.seg {
+      padding: 4px 8px;
+      font-size: 0.85em;
+    }
+    .zoom button.seg.armed {
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+      border-color: var(--primary-color);
     }
     button.chip.armed {
       background: var(--primary-color);

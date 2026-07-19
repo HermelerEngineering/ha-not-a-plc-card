@@ -30,8 +30,9 @@ describe("fb type metadata", () => {
   });
 
   it("describes the editable fields per type", () => {
+    // Stored in ms, but entered/shown as a duration (5s / 3m / 1h).
     expect(fbFields("TON")).toEqual([
-      { key: "preset_ms", kind: "int", label: "preset (ms)" },
+      { key: "preset_ms", kind: "duration", label: "preset" },
     ]);
     expect(fbFields("CTU").map((f) => f.key)).toEqual(["pv", "reset"]);
     expect(fbFields("CTD").map((f) => f.key)).toEqual(["pv", "load"]);

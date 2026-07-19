@@ -86,7 +86,9 @@ import {
   FbField,
   addFb,
   fbFields,
+  fbOutputRefs,
   isFbReferenced,
+  isSourceType,
   removeFb,
   renameFb,
   setFbParam,
@@ -460,6 +462,16 @@ export class NotAPlcPanel extends LitElement {
 
   private _fbNames(): string[] {
     return Object.keys(this._program?.fbs ?? {});
+  }
+
+  /**
+   * Everything valid on the numeric side of a compare: REAL tags plus each
+   * function block's numeric outputs (`t1.ET`, `c1.CV`, `clock.TOD`, …). Without
+   * the fb refs those were unreachable once operand entry became a dropdown.
+   */
+  private _realOperands(): string[] {
+    const tags = this._tagNames((t) => t.type === "REAL");
+    return this._program ? [...tags, ...fbOutputRefs(this._program)] : tags;
   }
 
   private _addFb(): void {
@@ -1313,11 +1325,7 @@ export class NotAPlcPanel extends LitElement {
       const c = el as CompareEl;
       body = html`
         <span class="el-type">compare</span>
-        ${this._tagSelect(
-          c.left,
-          this._tagNames((t) => t.type === "REAL"),
-          (v) => set({ ...c, left: v }),
-        )}
+        ${this._tagSelect(c.left, this._realOperands(), (v) => set({ ...c, left: v }))}
         <select
           .value=${c.op}
           @change=${(e: Event) =>
@@ -1598,7 +1606,8 @@ export class NotAPlcPanel extends LitElement {
     tools.splice(
       5,
       0,
-      ...FB_TYPES.map((type) => ({
+      // Source blocks (CLOCK) are declared, never placed — no palette chip.
+      ...FB_TYPES.filter((type) => !isSourceType(type)).map((type) => ({
         label: type,
         target: "element" as ToolTarget,
         make: () => newFbRef(""),

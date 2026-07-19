@@ -11,6 +11,7 @@
  */
 
 import { SeriesStep } from "./elements";
+import { fbNumericOutputs, isSourceType } from "./fbs";
 import {
   Element,
   Output,
@@ -50,9 +51,13 @@ export function validateProgram(program: Program): ValidationIssue[] {
     if (typeof val === "number") return null; // a numeric constant
     if (val === "") return "is empty";
     if (val.includes(".")) {
-      // A function-block numeric output like "t1.ET" / "c1.CV".
-      const inst = val.split(".")[0];
-      return inst in fbs ? null : `references unknown function block "${inst}"`;
+      // A function-block numeric output like "t1.ET" / "c1.CV" / "clock.TOD".
+      const [inst, out] = val.split(".");
+      if (!(inst in fbs)) return `references unknown function block "${inst}"`;
+      const outs = fbNumericOutputs(fbs[inst].type);
+      if (outs.includes(out)) return null;
+      const hint = outs.length ? ` — try ${outs.join(", ")}` : "";
+      return `references "${out}", which ${inst} (${fbs[inst].type}) does not have${hint}`;
     }
     return val in tags ? null : `references unknown tag "${val}"`;
   };
@@ -80,6 +85,14 @@ export function validateProgram(program: Program): ValidationIssue[] {
           if (!el.instance) add("error", "function block not selected", at);
           else if (!(el.instance in fbs))
             add("error", `references unknown function block "${el.instance}"`, at);
+          else if (isSourceType(fbs[el.instance].type))
+            // A source block has no rung input; it is used via its outputs.
+            add(
+              "error",
+              `a ${fbs[el.instance].type} block is not placed in a rung — ` +
+                `compare against its outputs instead (e.g. ${el.instance}.TOD)`,
+              at,
+            );
         } else if (isBranch(el)) {
           el.branch.forEach((path, pi) => {
             if (path.length === 0) add("error", `branch OR-path ${pi + 1} is empty`, at);

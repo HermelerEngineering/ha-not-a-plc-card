@@ -71,6 +71,31 @@ describe("validateProgram", () => {
     expect(msgs).toContain('references unknown function block "nope"');
   });
 
+  it("flags an output the referenced block does not have", () => {
+    const p = base();
+    p.fbs = { clock: { type: "CLOCK" }, c1: { type: "CTU", pv: 3 } };
+    p.networks[0].rungs[0].series = [
+      { type: "compare", op: "GE", left: "clock.TOD", right: 1350 },
+      { type: "compare", op: "EQ", left: "clock.NOPE", right: 1 },
+      { type: "compare", op: "EQ", left: "c1.ET", right: 1 },
+    ];
+    const msgs = validateProgram(p).map((i) => i.message);
+    // A real CLOCK output is accepted...
+    expect(msgs.some((m) => m.includes("clock.TOD"))).toBe(false);
+    // ...an invented one is flagged, and the valid outputs are offered as a hint.
+    expect(msgs.some((m) => m.includes('"NOPE"') && m.includes("TOD"))).toBe(true);
+    // A timer output on a counter is flagged too.
+    expect(msgs.some((m) => m.includes('"ET"') && m.includes("CTU"))).toBe(true);
+  });
+
+  it("flags a source block placed in a rung", () => {
+    const p = base();
+    p.fbs = { clock: { type: "CLOCK" } };
+    p.networks[0].rungs[0].series = [{ type: "fb", instance: "clock" }];
+    const msgs = validateProgram(p).map((i) => i.message);
+    expect(msgs.some((m) => m.includes("not placed in a rung"))).toBe(true);
+  });
+
   it("descends into branch paths", () => {
     const p = base();
     p.networks[0].rungs[0].series = [

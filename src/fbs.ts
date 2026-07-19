@@ -27,12 +27,46 @@ export const EDGE_TYPES = ["R_TRIG", "F_TRIG"];
 export const TIMER_TYPES = ["TON", "TOF", "TP"];
 export const COUNTER_TYPES = ["CTU", "CTD"];
 export const LATCH_TYPES = ["SR", "RS"];
+/**
+ * Source blocks have no rung input and no state: the engine solves them once at
+ * the start of each scan, so they are **declared but never placed** in a rung —
+ * you use them by referencing their outputs (`clock.TOD`).
+ */
+export const SOURCE_TYPES = ["CLOCK"];
 export const FB_TYPES = [
   ...EDGE_TYPES,
   ...TIMER_TYPES,
   ...COUNTER_TYPES,
   ...LATCH_TYPES,
+  ...SOURCE_TYPES,
 ];
+
+/** Whether a block type is a source (declared only, never placed in a rung). */
+export function isSourceType(type: string): boolean {
+  return SOURCE_TYPES.includes(type);
+}
+
+/**
+ * The numeric outputs a block type exposes, referenced as `instance.<OUTPUT>`
+ * (e.g. `t1.ET`, `clock.TOD`). Mirrors the engine's `fb_numeric_outputs`.
+ */
+export function fbNumericOutputs(type: string): string[] {
+  if (TIMER_TYPES.includes(type)) return ["ET"];
+  if (COUNTER_TYPES.includes(type)) return ["CV"];
+  // CLOCK: local time/date. TOD = minutes since midnight (0-1439);
+  // WD = ISO weekday, 1 = Monday .. 7 = Sunday.
+  if (type === "CLOCK") return ["H", "M", "S", "TOD", "WD", "D", "MO", "Y"];
+  return [];
+}
+
+/** Every `instance.<OUTPUT>` reference a program makes available, sorted. */
+export function fbOutputRefs(program: Program): string[] {
+  const refs: string[] = [];
+  for (const [name, def] of Object.entries(program.fbs ?? {})) {
+    for (const out of fbNumericOutputs(def.type)) refs.push(`${name}.${out}`);
+  }
+  return refs.sort();
+}
 
 export type FbFieldKind = "int" | "tag" | "duration";
 

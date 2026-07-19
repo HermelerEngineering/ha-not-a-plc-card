@@ -5,8 +5,11 @@ import {
   FB_TYPES,
   addFb,
   fbFields,
+  fbNumericOutputs,
+  fbOutputRefs,
   freshFbName,
   isFbReferenced,
+  isSourceType,
   newFb,
   removeFb,
   renameFb,
@@ -15,7 +18,7 @@ import {
 } from "../src/fbs";
 
 describe("fb type metadata", () => {
-  it("lists the nine implemented block types", () => {
+  it("lists the implemented block types", () => {
     expect(FB_TYPES).toEqual([
       "R_TRIG",
       "F_TRIG",
@@ -26,6 +29,48 @@ describe("fb type metadata", () => {
       "CTD",
       "SR",
       "RS",
+      "CLOCK",
+    ]);
+  });
+
+  it("marks CLOCK as a source block (declared, never placed in a rung)", () => {
+    expect(isSourceType("CLOCK")).toBe(true);
+    expect(isSourceType("TON")).toBe(false);
+    expect(fbFields("CLOCK")).toEqual([]); // no parameters
+  });
+
+  it("knows each type's numeric outputs", () => {
+    expect(fbNumericOutputs("TON")).toEqual(["ET"]);
+    expect(fbNumericOutputs("CTU")).toEqual(["CV"]);
+    expect(fbNumericOutputs("CLOCK")).toEqual([
+      "H",
+      "M",
+      "S",
+      "TOD",
+      "WD",
+      "D",
+      "MO",
+      "Y",
+    ]);
+    expect(fbNumericOutputs("R_TRIG")).toEqual([]);
+  });
+
+  it("enumerates the instance.OUTPUT refs a program offers", () => {
+    const program = {
+      tags: {},
+      fbs: { clock: { type: "CLOCK" }, t1: { type: "TON", preset_ms: 1000 } },
+      networks: [],
+    } as Program;
+    expect(fbOutputRefs(program)).toEqual([
+      "clock.D",
+      "clock.H",
+      "clock.M",
+      "clock.MO",
+      "clock.S",
+      "clock.TOD",
+      "clock.WD",
+      "clock.Y",
+      "t1.ET",
     ]);
   });
 

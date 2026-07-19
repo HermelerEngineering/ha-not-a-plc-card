@@ -285,6 +285,11 @@ export class NotAPlcCard extends LitElement {
       font-size: 15px;
       font-weight: 600;
     }
+    text.rung-title {
+      fill: var(--secondary-text-color);
+      font-size: 12px;
+      font-weight: 500;
+    }
   `;
 }
 

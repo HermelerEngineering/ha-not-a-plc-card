@@ -68,6 +68,8 @@ const CELL_W = 88;
 const CELL_H = 56;
 const PAD = 14;
 const TITLE_H = 22;
+/** Vertical room a rung's title takes above the rung itself. */
+const RUNG_TITLE_H = 18;
 const RAIL_W = 10;
 const SYMBOL_HALF = 9;
 /** Vertical gap between stacked rungs in a network. */
@@ -246,16 +248,18 @@ class RungPainter {
     this.parts.push(
       svg`<rect x=${mid - boxW / 2} y=${y - boxH / 2} width=${boxW} height=${boxH} rx="3" class=${cls} fill="none" />`,
     );
-    // Left operand (with its live value) above; operator + right operand inside.
+    // Read like a contact: what is being compared (with its live value) above,
+    // the operator alone inside the box, and what it is compared against below.
     const leftVal = fmtNumber(this.state[el.left]);
     const leftLabel = leftVal !== null ? `${el.left} = ${leftVal}` : el.left;
     this.label(mid, y - 20, leftLabel, "tag");
+    this.label(mid, y + 5, OP_SYMBOL[el.op], "compare-text");
     let rightLabel = String(el.right);
     if (typeof el.right === "string") {
       const rv = fmtNumber(this.state[el.right]);
-      if (rv !== null) rightLabel = `${el.right}=${rv}`;
+      if (rv !== null) rightLabel = `${el.right} = ${rv}`;
     }
-    this.label(mid, y + 4, `${OP_SYMBOL[el.op]} ${rightLabel}`, "compare-text");
+    this.label(mid, y + 26, rightLabel, "tag");
     return { endCol: col + 1, poweredOut: live };
   }
 
@@ -842,6 +846,13 @@ export function renderNetwork(
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
   network.rungs.forEach((rung, ri) => {
+    // A rung's own title sits above it, and pushes the rung down by its height —
+    // drawn here rather than in `renderRung` so every geometry the editor reports
+    // (hit-targets, slot positions, y-bands) keeps using the baseY it is given.
+    if (rung.title) {
+      parts.push(svg`<text x=${PAD} y=${y + 12} class="rung-title">${rung.title}</text>`);
+      y += RUNG_TITLE_H;
+    }
     const r = renderRung(rung, y, flow, contentWidth, fbs, state, edit, ri);
     parts.push(r.part);
     y += r.height + RUNG_GAP;

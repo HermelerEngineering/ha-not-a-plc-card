@@ -392,6 +392,8 @@ export interface CanvasEdit {
   onRungPointerDown?: (ri: number, ev: PointerEvent) => void;
   /** Gap index (0..rungCount) a dragged rung would drop into; draws a line. */
   rungDrop?: number | null;
+  /** Commit a rung's title (edited inline on the canvas). */
+  onRungTitle?: (ri: number, title: string) => void;
   /** Reports a rung's y-band, top-level slot x's, and all drop targets. */
   onGeometry?: (
     ri: number,
@@ -861,8 +863,24 @@ export function renderNetwork(
     gapYs.push(rungTop);
     // A rung's own title sits above it, and pushes the rung down by its height —
     // drawn here rather than in `renderRung` so every geometry the editor reports
-    // (hit-targets, slot positions, y-bands) keeps using the baseY it is given.
-    if (rung.title) {
+    // (hit-targets, slot positions, y-bands) keeps using the baseY it is given. In
+    // the editor it is an inline input (always shown, so a title can be added);
+    // the read-only card just draws the text when there is one.
+    if (edit?.onRungTitle) {
+      parts.push(
+        svg`<foreignObject x=${PAD} y=${y} width="260" height=${RUNG_TITLE_H}>
+          <input
+            xmlns="http://www.w3.org/1999/xhtml"
+            class="rung-title-input"
+            .value=${rung.title ?? ""}
+            placeholder="rung title"
+            @change=${(ev: Event) =>
+              edit.onRungTitle!(ri, (ev.target as HTMLInputElement).value)}
+          />
+        </foreignObject>`,
+      );
+      y += RUNG_TITLE_H;
+    } else if (rung.title) {
       parts.push(svg`<text x=${PAD} y=${y + 12} class="rung-title">${rung.title}</text>`);
       y += RUNG_TITLE_H;
     }

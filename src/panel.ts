@@ -2152,6 +2152,7 @@ export class NotAPlcPanel extends LitElement {
       onRungPointerDown: (ri, ev) => this._rungPointerDown(ni, ri, ev),
       rungDrop:
         this._rungDrag?.moved && this._rungDrag.ni === ni ? this._rungDrag.drop ?? null : null,
+      onRungTitle: (ri, title) => this._edit((p) => setRungTitle(p, ni, ri, title)),
       onGeometry: (ri, geom) => {
         const arr = this._geom.get(ni) ?? [];
         arr.push({ ri, ...geom });
@@ -2176,7 +2177,15 @@ export class NotAPlcPanel extends LitElement {
       <div class="cv-net">
         <div class="cv-net-head">
           <span class="chip-id">${net.id}</span>
-          ${net.title ? html`<span class="net-title">${net.title}</span>` : ""}
+          <input
+            class="net-title-input"
+            .value=${net.title ?? ""}
+            placeholder="network name"
+            @change=${(e: Event) =>
+              this._edit((p) =>
+                setNetworkTitle(p, ni, (e.target as HTMLInputElement).value),
+              )}
+          />
           <span class="spacer"></span>
           <button class="secondary small" @click=${() => this._edit((p) => addRung(p, ni))}>
             + Rung
@@ -2559,9 +2568,38 @@ export class NotAPlcPanel extends LitElement {
       border-radius: 4px;
       padding: 1px 6px;
     }
-    /* Network name, shown next to the id chip (the SVG omits it in the editor). */
-    .net-title {
+    /* Network name, editable next to the id chip (the SVG omits it in the editor). */
+    .net-title-input {
+      font: inherit;
       font-weight: 600;
+      color: var(--primary-text-color);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 6px;
+      min-width: 8em;
+    }
+    .net-title-input:hover,
+    .net-title-input:focus {
+      border-color: var(--divider-color, #ccc);
+      background: var(--card-background-color, #fff);
+    }
+    /* Inline rung-title input drawn in the SVG (via foreignObject) in the editor. */
+    .rung-title-input {
+      font: inherit;
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 1px 4px;
+      width: 96%;
+      box-sizing: border-box;
+    }
+    .rung-title-input:hover,
+    .rung-title-input:focus {
+      border-color: var(--divider-color, #ccc);
+      background: var(--card-background-color, #fff);
     }
     .spacer {
       flex: 1;

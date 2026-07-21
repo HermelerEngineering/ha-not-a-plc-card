@@ -27,6 +27,7 @@ import {
   removeRung,
   setNetworkTitle,
   setRungTitle,
+  cloneElement,
   elementAt,
   moveElementAcross,
   moveElementToRung,
@@ -113,6 +114,20 @@ function prog2(): Program {
     ],
   };
 }
+
+describe("cloneElement", () => {
+  it("deep-copies an element so the copy is independent", () => {
+    const branch = { branch: [[newContact("a"), newContact("b")], [newContact("c")]] };
+    const copy = cloneElement(branch);
+    expect(copy).toEqual(branch);
+    expect(copy).not.toBe(branch);
+    if (isBranch(copy)) {
+      // Mutating the copy must not touch the original.
+      copy.branch[0][0] = newContact("z");
+      expect((branch.branch[0][0] as { tag: string }).tag).toBe("a");
+    }
+  });
+});
 
 describe("moveElementToRung", () => {
   it("moves an element to another rung in the same network", () => {

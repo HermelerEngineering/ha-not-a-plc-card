@@ -101,6 +101,7 @@ import {
   addElementIn,
   addNetwork,
   addRung,
+  cloneElement,
   insertCoil,
   insertElementIn,
   moveElementIn,
@@ -251,6 +252,9 @@ export class NotAPlcPanel extends LitElement {
     steps: SeriesStep[];
     ei: number;
     moved: boolean;
+    // Whether a copy modifier (Ctrl/Cmd) is currently held: drop duplicates the
+    // element instead of moving it.
+    copy: boolean;
     // The resolved drop slot — any insertion slot in any rung/network (top-level
     // or inside a branch), so an element can be dragged across rungs.
     target?: { ni: number; ri: number; steps: SeriesStep[]; index: number };
@@ -273,7 +277,7 @@ export class NotAPlcPanel extends LitElement {
   private _placeStartY = 0;
   private _placeMoved = false;
   private readonly _onDragMove = (ev: PointerEvent) => this._dragMove(ev);
-  private readonly _onDragUp = () => this._dragUp();
+  private readonly _onDragUp = (ev: PointerEvent) => this._dragUp(ev);
   private readonly _onPlaceMove = (ev: PointerEvent) => this._placeMove(ev);
   private readonly _onPlaceUp = () => this._placeUp();
 
@@ -1755,7 +1759,7 @@ export class NotAPlcPanel extends LitElement {
     if (this._tool || ev.button !== 0) return;
     this._dragStartX = ev.clientX;
     this._dragStartY = ev.clientY;
-    this._drag = { ni, ri, steps, ei, moved: false };
+    this._drag = { ni, ri, steps, ei, moved: false, copy: ev.ctrlKey || ev.metaKey };
     window.addEventListener("pointermove", this._onDragMove);
     window.addEventListener("pointerup", this._onDragUp);
   }
@@ -1800,12 +1804,13 @@ export class NotAPlcPanel extends LitElement {
     } else {
       target = undefined;
     }
-    if (moved !== d.moved || placeKey(target) !== placeKey(d.target)) {
-      this._drag = { ...d, moved, target };
+    const copy = ev.ctrlKey || ev.metaKey;
+    if (moved !== d.moved || copy !== d.copy || placeKey(target) !== placeKey(d.target)) {
+      this._drag = { ...d, moved, copy, target };
     }
   }
 
-  private _dragUp(): void {
+  private _dragUp(ev: PointerEvent): void {
     window.removeEventListener("pointermove", this._onDragMove);
     window.removeEventListener("pointerup", this._onDragUp);
     const d = this._drag;
@@ -1817,14 +1822,40 @@ export class NotAPlcPanel extends LitElement {
       this._selectEl(d.ni, d.ri, d.steps, d.ei);
       return;
     }
-    if (d.target) {
-      const to = d.target;
+    if (!d.target) return;
+    const to = d.target;
+    if (ev.ctrlKey || ev.metaKey) {
+      // Ctrl/Cmd held: duplicate the element at the drop slot, leaving the
+      // original in place. An fb element gets a fresh instance of the same type
+      // (so the copy is an independent block, matching place-an-fb).
+      this._duplicateElement(d, to);
+    } else {
       this._edit((p) =>
         moveElementToRung(p, { ni: d.ni, ri: d.ri, steps: d.steps, ei: d.ei }, to),
       );
-      // Clear selection: the old position may no longer point at this element.
-      this._sel = undefined;
     }
+    // Clear selection: the old position may no longer point at this element.
+    this._sel = undefined;
+  }
+
+  private _duplicateElement(
+    from: { ni: number; ri: number; steps: SeriesStep[]; ei: number },
+    to: { ni: number; ri: number; steps: SeriesStep[]; index: number },
+  ): void {
+    if (!this._program) return;
+    const src = this._elementAt(from.ni, from.ri, from.steps, from.ei);
+    if (!src) return;
+    this._edit((p) => {
+      let prog = p;
+      let copy = cloneElement(src);
+      if (isFb(copy)) {
+        const type = prog.fbs?.[(copy as FbRefEl).instance]?.type;
+        const { program: next, name } = addFb(prog, type);
+        prog = next;
+        copy = { ...(copy as FbRefEl), instance: name };
+      }
+      return insertElementIn(prog, to.ni, to.ri, to.steps, to.index, copy);
+    });
   }
 
   // --- drag a new element from the palette onto the live view ----------------
@@ -1981,7 +2012,7 @@ export class NotAPlcPanel extends LitElement {
           ? `Drag onto a rung to place “${this._placeTool.label}”.`
           : this._tool
             ? `Drag a tool onto the ladder, or click a ＋ slot to place “${this._tool.label}”.`
-            : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to reorder."}
+            : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to move (across rungs too), Ctrl-drag to duplicate."}
       </div>
     `;
   }
@@ -2035,7 +2066,8 @@ export class NotAPlcPanel extends LitElement {
         this._placeTool?.target ?? this._tool?.target ?? (reordering ? "element" : null),
       selected,
       dragSource:
-        this._drag?.ni === ni
+        // Don't ghost the source while copying (Ctrl/Cmd) — the original stays.
+        this._drag?.ni === ni && !this._drag?.copy
           ? { ri: this._drag.ri, steps: this._drag.steps, ei: this._drag.ei }
           : null,
       placeDrop,

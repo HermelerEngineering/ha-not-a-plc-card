@@ -362,6 +362,11 @@ export function moveElementAcross(
   return insertElementIn(removed, ni, ri, steps, index, el);
 }
 
+/** A deep copy of an element (the IR is plain JSON data, so this is safe). */
+export function cloneElement(el: Element): Element {
+  return JSON.parse(JSON.stringify(el)) as Element;
+}
+
 /**
  * Move an element to an insertion slot in a possibly-different rung/network.
  * Within one rung this is exactly {@link moveElementAcross} (which corrects the

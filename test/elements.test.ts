@@ -11,6 +11,7 @@ import {
   addRung,
   freshId,
   insertCoil,
+  moveCoil,
   insertElementIn,
   moveElement,
   moveRung,
@@ -352,6 +353,25 @@ describe("element ops", () => {
     expect((p.networks[0].rungs[0].coils[1] as Coil).mode).toBe("R");
     p = removeCoil(p, 0, 0, 0);
     expect(p.networks[0].rungs[0].coils).toHaveLength(1);
+  });
+
+  it("reorders outputs within a rung's coil stack", () => {
+    let p = addCoil(prog(), 0, 0, newCoil("second"));
+    p = addCoil(p, 0, 0, newCoil("third"));
+    // coils = [out, second, third]; move the first down two positions.
+    p = moveCoil(p, 0, 0, 0, 2);
+    expect(p.networks[0].rungs[0].coils.map((c) => (c as Coil).tag)).toEqual([
+      "second",
+      "third",
+      "out",
+    ]);
+    // Out-of-range delta leaves the order unchanged.
+    const p2 = moveCoil(p, 0, 0, 0, -1);
+    expect(p2.networks[0].rungs[0].coils.map((c) => (c as Coil).tag)).toEqual([
+      "second",
+      "third",
+      "out",
+    ]);
   });
 
   it("leaves the original program unchanged", () => {

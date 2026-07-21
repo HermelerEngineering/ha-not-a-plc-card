@@ -116,6 +116,15 @@ export interface RungGeom {
   slotXs: number[];
   /** Every insertion slot (top-level + nested) as a palette drop target. */
   targets: SlotTarget[];
+  /** Each output's vertical band in the coil column (for drag-reorder). */
+  coilBands?: CoilBand[];
+}
+
+/** One output's vertical band in a rung's coil column (user-space y). */
+export interface CoilBand {
+  ci: number;
+  top: number;
+  bottom: number;
 }
 
 /** One insertion slot as a palette-drag drop target, in a rung's SVG space. */

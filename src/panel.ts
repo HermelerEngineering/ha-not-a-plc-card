@@ -104,6 +104,7 @@ import {
   cloneElement,
   insertCoil,
   insertElementIn,
+  moveCoil,
   moveElementIn,
   moveElementToRung,
   moveNetwork,
@@ -273,6 +274,14 @@ export class NotAPlcPanel extends LitElement {
     moved: boolean;
     drop?: number;
   };
+  /** In-progress output reorder drag within a rung's coil stack. */
+  @state() private _coilDrag?: {
+    ni: number;
+    ri: number;
+    ci: number;
+    moved: boolean;
+    drop?: number;
+  };
   /** In-progress palette element being dragged onto the live view, and its target. */
   @state() private _placeTool?: Tool;
   @state() private _placeTarget?: {
@@ -296,6 +305,10 @@ export class NotAPlcPanel extends LitElement {
   private readonly _onRungUp = () => this._rungUp();
   private _rungStartX = 0;
   private _rungStartY = 0;
+  private readonly _onCoilMove = (ev: PointerEvent) => this._coilMove(ev);
+  private readonly _onCoilUp = () => this._coilUp();
+  private _coilStartX = 0;
+  private _coilStartY = 0;
   private readonly _onPlaceMove = (ev: PointerEvent) => this._placeMove(ev);
   private readonly _onPlaceUp = () => this._placeUp();
 
@@ -1922,6 +1935,63 @@ export class NotAPlcPanel extends LitElement {
     if (delta !== 0) this._edit((p) => moveRung(p, d.ni, d.ri, delta));
   }
 
+  // --- reorder outputs by dragging them in the coil stack --------------------
+
+  private _coilPointerDown(ni: number, ri: number, ci: number, ev: PointerEvent): void {
+    if (this._tool || ev.button !== 0) return;
+    this._coilStartX = ev.clientX;
+    this._coilStartY = ev.clientY;
+    this._coilDrag = { ni, ri, ci, moved: false };
+    window.addEventListener("pointermove", this._onCoilMove);
+    window.addEventListener("pointerup", this._onCoilUp);
+  }
+
+  private _coilMove(ev: PointerEvent): void {
+    const d = this._coilDrag;
+    if (!d) return;
+    let moved = d.moved;
+    if (
+      !moved &&
+      (Math.abs(ev.clientX - this._coilStartX) > 4 ||
+        Math.abs(ev.clientY - this._coilStartY) > 4)
+    ) {
+      moved = true;
+    }
+    // Outputs reorder within their own rung's stack; resolve the drop gap from the
+    // pointer y over that rung's coil bands.
+    let drop = d.drop;
+    const svg = this._canvasUnder(ev.clientX, ev.clientY);
+    const geoms = svg && Number(svg.dataset.ni) === d.ni ? this._geom.get(d.ni) : undefined;
+    const bands = geoms?.find((g) => g.ri === d.ri)?.coilBands;
+    if (svg && bands && bands.length > 0) {
+      const { y } = this._toUserXY(svg, ev.clientX, ev.clientY);
+      drop = rungDropGap(
+        bands.map((b) => ({ ri: b.ci, top: b.top, bottom: b.bottom })),
+        y,
+      );
+    }
+    if (moved !== d.moved || drop !== d.drop) this._coilDrag = { ...d, moved, drop };
+  }
+
+  private _coilUp(): void {
+    window.removeEventListener("pointermove", this._onCoilMove);
+    window.removeEventListener("pointerup", this._onCoilUp);
+    const d = this._coilDrag;
+    this._coilDrag = undefined;
+    if (!d) return;
+    // Released without moving: treat as a plain click → select / open the popup.
+    if (!d.moved) {
+      this._selectCoil(d.ni, d.ri, d.ci);
+      return;
+    }
+    if (d.drop == null) return;
+    const delta = reorderDelta(d.ci, d.drop);
+    if (delta !== 0) {
+      this._edit((p) => moveCoil(p, d.ni, d.ri, d.ci, delta));
+      this._sel = undefined;
+    }
+  }
+
   // --- drag a new element from the palette onto the live view ----------------
 
   private _chipPointerDown(tool: Tool, ev: PointerEvent): void {
@@ -2076,7 +2146,7 @@ export class NotAPlcPanel extends LitElement {
           ? `Drag onto a rung to place “${this._placeTool.label}”.`
           : this._tool
             ? `Drag a tool onto the ladder, or click a ＋ slot to place “${this._tool.label}”.`
-            : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to move (across rungs too), Ctrl-drag to duplicate."}
+            : "Drag a tool onto the ladder to add it. Click to select an element, click it again to edit; drag to move (across rungs too), Ctrl-drag to duplicate. Drag an output to reorder it in the coil stack; drag a rung's ⋮ handle to reorder rungs."}
       </div>
     `;
   }
@@ -2149,6 +2219,15 @@ export class NotAPlcPanel extends LitElement {
       onAddPath: (ri, steps, ei) => this._addBranchPath(ni, ri, steps, ei),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
+      onCoilPointerDown: (ri, ci, ev) => this._coilPointerDown(ni, ri, ci, ev),
+      coilDrag:
+        this._coilDrag?.moved && this._coilDrag.ni === ni
+          ? { ri: this._coilDrag.ri, gap: this._coilDrag.drop ?? this._coilDrag.ci }
+          : null,
+      coilDragSource:
+        this._coilDrag?.moved && this._coilDrag.ni === ni
+          ? { ri: this._coilDrag.ri, ci: this._coilDrag.ci }
+          : null,
       onRungPointerDown: (ri, ev) => this._rungPointerDown(ni, ri, ev),
       rungDrop:
         this._rungDrag?.moved && this._rungDrag.ni === ni ? this._rungDrag.drop ?? null : null,
@@ -3088,7 +3167,8 @@ export class NotAPlcPanel extends LitElement {
       pointer-events: none;
       user-select: none;
     }
-    line.rung-drop-line {
+    line.rung-drop-line,
+    line.coil-drop-line {
       stroke: var(--primary-color);
       stroke-width: 3;
       stroke-linecap: round;

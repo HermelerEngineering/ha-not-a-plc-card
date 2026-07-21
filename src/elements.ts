@@ -521,3 +521,17 @@ export function updateCoil(
     coils: mapAt(r.coils, ci, () => output),
   }));
 }
+
+/** Move the output at `ci` by `delta` positions within the rung's output stack. */
+export function moveCoil(
+  program: Program,
+  ni: number,
+  ri: number,
+  ci: number,
+  delta: number,
+): Program {
+  return updateRungAt(program, ni, ri, (r) => ({
+    ...r,
+    coils: moveItem(r.coils, ci, delta),
+  }));
+}

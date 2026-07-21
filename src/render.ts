@@ -38,7 +38,7 @@ import {
   isNot,
 } from "./ir";
 import { blockPinRows, fbBlock, outputBlock } from "./block";
-import { SlotTarget } from "./canvas";
+import { CoilBand, SlotTarget } from "./canvas";
 import { SeriesStep } from "./elements";
 import {
   SeriesInfo,
@@ -388,16 +388,31 @@ export interface CanvasEdit {
   onAddPath?: (ri: number, steps: SeriesStep[], ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
+  /**
+   * A pointer went down on an output hit-target (to drag-reorder it in the coil
+   * stack). The panel decides drag (moved) vs. select (released in place).
+   */
+  onCoilPointerDown?: (ri: number, ci: number, ev: PointerEvent) => void;
+  /** Which gap (0..coilCount) a dragged output would drop into; draws a line. */
+  coilDrag?: { ri: number; gap: number } | null;
+  /** The output being drag-reordered in this network (dimmed as a ghost), or null. */
+  coilDragSource?: { ri: number; ci: number } | null;
   /** A pointer went down on a rung's drag handle (to reorder rungs). */
   onRungPointerDown?: (ri: number, ev: PointerEvent) => void;
   /** Gap index (0..rungCount) a dragged rung would drop into; draws a line. */
   rungDrop?: number | null;
   /** Commit a rung's title (edited inline on the canvas). */
   onRungTitle?: (ri: number, title: string) => void;
-  /** Reports a rung's y-band, top-level slot x's, and all drop targets. */
+  /** Reports a rung's y-band, top-level slot x's, drop targets, and coil bands. */
   onGeometry?: (
     ri: number,
-    geom: { top: number; bottom: number; slotXs: number[]; targets: SlotTarget[] },
+    geom: {
+      top: number;
+      bottom: number;
+      slotXs: number[];
+      targets: SlotTarget[];
+      coilBands: CoilBand[];
+    },
   ) => void;
   /**
    * A pointer went down on an element hit-target (`steps` = [] for a top-level
@@ -437,6 +452,12 @@ function renderRung(
     coilRowAcc += outputRows(output);
   }
   const totalCoilRows = coilRowAcc;
+  // Each output's vertical band in the coil column (contiguous, top-down), for the
+  // editor's drag-reorder hit-testing and drop line.
+  const coilBands: CoilBand[] = rung.coils.map((output, i) => {
+    const top = coilTaps[i] - CELL_H / 2;
+    return { ci: i, top, bottom: top + outputRows(output) * CELL_H };
+  });
   // The rung is as tall as its widest need: the series' branch rows or the stacked
   // coil rows.
   const rows = Math.max(measure.rows, totalCoilRows, 1);
@@ -653,9 +674,16 @@ function renderRung(
         edit.selected.ci === i;
       if (edit.armed === null) {
         painter.parts.push(
-          svg`<rect class="hit-el ${sel ? "sel" : ""}" x=${coilX} y=${cy - CELL_H / 2}
-            width=${hitW} height=${hitH} @click=${() => edit.onSelectCoil(ri, i)} />`,
+          svg`<rect class="hit-el drag-el ${sel ? "sel" : ""}" x=${coilX} y=${cy - CELL_H / 2}
+            width=${hitW} height=${hitH}
+            @pointerdown=${(ev: PointerEvent) => edit.onCoilPointerDown?.(ri, i, ev)} />`,
         );
+        if (edit.coilDragSource?.ri === ri && edit.coilDragSource.ci === i) {
+          painter.parts.push(
+            svg`<rect class="drag-ghost" x=${coilX} y=${cy - CELL_H / 2}
+              width=${hitW} height=${hitH} />`,
+          );
+        }
       } else if (sel) {
         painter.parts.push(
           svg`<rect class="sel-outline" x=${coilX} y=${cy - CELL_H / 2}
@@ -663,6 +691,16 @@ function renderRung(
         );
       }
     });
+    // The output-reorder drop line, in the gap the dragged output would land in.
+    if (edit.coilDrag && edit.coilDrag.ri === ri && coilBands.length > 0) {
+      const g = Math.max(0, Math.min(edit.coilDrag.gap, coilBands.length));
+      const lineY =
+        g < coilBands.length ? coilBands[g].top : coilBands[coilBands.length - 1].bottom;
+      const dropW = hasOutputBlock ? OUTPUT_BLOCK_SPACE : CELL_W;
+      painter.parts.push(
+        svg`<line class="coil-drop-line" x1=${coilX} y1=${lineY} x2=${coilX + dropW} y2=${lineY} />`,
+      );
+    }
     if (edit.armed === "coil") {
       const cy = baselineY + totalCoilRows * CELL_H;
       painter.parts.push(
@@ -805,7 +843,13 @@ function renderRung(
     }
 
     // Report geometry after both passes so `targets` includes nested slots.
-    edit.onGeometry?.(ri, { top: baseY, bottom: baseY + height, slotXs, targets });
+    edit.onGeometry?.(ri, {
+      top: baseY,
+      bottom: baseY + height,
+      slotXs,
+      targets,
+      coilBands,
+    });
   }
 
   return { part: svg`<g>${painter.parts}</g>`, height };

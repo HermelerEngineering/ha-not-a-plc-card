@@ -2932,6 +2932,19 @@ export class NotAPlcPanel extends LitElement {
       display: block;
       margin-top: 4px;
     }
+    /* Dragging elements/outputs/rungs across the ladder would otherwise sweep-select
+       the SVG text labels (and network headers between networks); suppress native
+       text selection across the whole canvas. The two inline title inputs re-enable
+       it so they stay editable. */
+    .canvas-scroll {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .canvas-scroll .rung-title-input,
+    .canvas-scroll .net-title-input {
+      user-select: text;
+      -webkit-user-select: text;
+    }
     /* Editor hit-targets overlaid on the ladder SVG. */
     .cv-svg .hit-el {
       fill: transparent;

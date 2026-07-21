@@ -104,7 +104,7 @@ import {
   cloneElement,
   insertCoil,
   insertElementIn,
-  moveCoil,
+  moveCoilToRung,
   moveElementIn,
   moveElementToRung,
   moveNetwork,
@@ -228,6 +228,10 @@ function placeKey(t?: { ni: number; ri: number; steps: SeriesStep[]; index: numb
   return `${t.ni}|${t.ri}|${steps}|${t.index}`;
 }
 
+function coilTargetKey(t?: { ni: number; ri: number; gap: number }): string {
+  return t ? `${t.ni}|${t.ri}|${t.gap}` : "";
+}
+
 @defineOnce("not-a-plc-panel")
 export class NotAPlcPanel extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistant;
@@ -274,13 +278,14 @@ export class NotAPlcPanel extends LitElement {
     moved: boolean;
     drop?: number;
   };
-  /** In-progress output reorder drag within a rung's coil stack. */
+  /** In-progress output drag: source output and the resolved target coil gap. */
   @state() private _coilDrag?: {
     ni: number;
     ri: number;
     ci: number;
     moved: boolean;
-    drop?: number;
+    // The resolved drop gap — the coil stack of any rung/network under the pointer.
+    target?: { ni: number; ri: number; gap: number };
   };
   /** In-progress palette element being dragged onto the live view, and its target. */
   @state() private _placeTool?: Tool;
@@ -1957,20 +1962,34 @@ export class NotAPlcPanel extends LitElement {
     ) {
       moved = true;
     }
-    // Outputs reorder within their own rung's stack; resolve the drop gap from the
-    // pointer y over that rung's coil bands.
-    let drop = d.drop;
+    // Resolve the drop gap in the coil stack of whatever rung is under the pointer,
+    // so an output can be dragged to another rung (even in another network): the
+    // rung whose y-band contains the pointer, then the gap in its coil bands.
+    let target = d.target;
     const svg = this._canvasUnder(ev.clientX, ev.clientY);
-    const geoms = svg && Number(svg.dataset.ni) === d.ni ? this._geom.get(d.ni) : undefined;
-    const bands = geoms?.find((g) => g.ri === d.ri)?.coilBands;
-    if (svg && bands && bands.length > 0) {
+    const ni = svg ? Number(svg.dataset.ni) : NaN;
+    const geoms = svg ? this._geom.get(ni) : undefined;
+    if (svg && geoms) {
       const { y } = this._toUserXY(svg, ev.clientX, ev.clientY);
-      drop = rungDropGap(
-        bands.map((b) => ({ ri: b.ci, top: b.top, bottom: b.bottom })),
-        y,
-      );
+      const g = geoms.find((r) => y >= r.top && y <= r.bottom);
+      if (g) {
+        const bands = g.coilBands ?? [];
+        const gap = bands.length
+          ? rungDropGap(
+              bands.map((b) => ({ ri: b.ci, top: b.top, bottom: b.bottom })),
+              y,
+            )
+          : 0;
+        target = { ni, ri: g.ri, gap };
+      } else {
+        target = undefined;
+      }
+    } else {
+      target = undefined;
     }
-    if (moved !== d.moved || drop !== d.drop) this._coilDrag = { ...d, moved, drop };
+    if (moved !== d.moved || coilTargetKey(target) !== coilTargetKey(d.target)) {
+      this._coilDrag = { ...d, moved, target };
+    }
   }
 
   private _coilUp(): void {
@@ -1984,12 +2003,17 @@ export class NotAPlcPanel extends LitElement {
       this._selectCoil(d.ni, d.ri, d.ci);
       return;
     }
-    if (d.drop == null) return;
-    const delta = reorderDelta(d.ci, d.drop);
-    if (delta !== 0) {
-      this._edit((p) => moveCoil(p, d.ni, d.ri, d.ci, delta));
-      this._sel = undefined;
-    }
+    const to = d.target;
+    if (!to) return;
+    this._edit((p) =>
+      moveCoilToRung(
+        p,
+        { ni: d.ni, ri: d.ri, ci: d.ci },
+        { ni: to.ni, ri: to.ri, index: to.gap },
+      ),
+    );
+    // Clear selection: the old position may no longer point at this output.
+    this._sel = undefined;
   }
 
   // --- drag a new element from the palette onto the live view ----------------
@@ -2221,8 +2245,8 @@ export class NotAPlcPanel extends LitElement {
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
       onCoilPointerDown: (ri, ci, ev) => this._coilPointerDown(ni, ri, ci, ev),
       coilDrag:
-        this._coilDrag?.moved && this._coilDrag.ni === ni
-          ? { ri: this._coilDrag.ri, gap: this._coilDrag.drop ?? this._coilDrag.ci }
+        this._coilDrag?.moved && this._coilDrag.target?.ni === ni
+          ? { ri: this._coilDrag.target.ri, gap: this._coilDrag.target.gap }
           : null,
       coilDragSource:
         this._coilDrag?.moved && this._coilDrag.ni === ni

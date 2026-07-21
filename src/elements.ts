@@ -535,3 +535,24 @@ export function moveCoil(
     coils: moveItem(r.coils, ci, delta),
   }));
 }
+
+/**
+ * Move the output at `from` to gap `to.index` in the (possibly different) rung's
+ * output stack. A same-rung move reduces to a `moveCoil` reorder, correcting the
+ * target index for the self-removal shift; a cross-rung move is a plain
+ * remove-then-insert (no shift — a different output list).
+ */
+export function moveCoilToRung(
+  program: Program,
+  from: { ni: number; ri: number; ci: number },
+  to: { ni: number; ri: number; index: number },
+): Program {
+  const src = program.networks[from.ni]?.rungs[from.ri]?.coils[from.ci];
+  if (!src) return program;
+  if (from.ni === to.ni && from.ri === to.ri) {
+    const target = to.index <= from.ci ? to.index : to.index - 1;
+    return moveCoil(program, from.ni, from.ri, from.ci, target - from.ci);
+  }
+  const removed = removeCoil(program, from.ni, from.ri, from.ci);
+  return insertCoil(removed, to.ni, to.ri, to.index, src);
+}

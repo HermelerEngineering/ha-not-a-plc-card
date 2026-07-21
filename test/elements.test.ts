@@ -29,6 +29,7 @@ import {
   setRungTitle,
   elementAt,
   moveElementAcross,
+  moveElementToRung,
   updateCoil,
   updateElement,
   updateElementIn,
@@ -86,6 +87,61 @@ describe("wrapInBranch", () => {
       expect(isBranch(inner)).toBe(true);
       if (isBranch(inner)) expect(inner.branch[0]).toEqual([newContact("c")]);
     }
+  });
+});
+
+/** A two-rung, two-network program for cross-rung move tests. */
+function prog2(): Program {
+  return {
+    tags: {
+      a: { kind: "input", type: "BOOL", source: "binary_sensor.a" },
+      b: { kind: "input", type: "BOOL", source: "binary_sensor.b" },
+      out: { kind: "coil", type: "BOOL" },
+    },
+    networks: [
+      {
+        id: "n1",
+        rungs: [
+          { id: "r1", series: [newContact("a"), newContact("b")], coils: [newCoil("out")] },
+          { id: "r2", series: [newContact("c")], coils: [newCoil("out")] },
+        ],
+      },
+      {
+        id: "n2",
+        rungs: [{ id: "r1", series: [newContact("d")], coils: [newCoil("out")] }],
+      },
+    ],
+  };
+}
+
+describe("moveElementToRung", () => {
+  it("moves an element to another rung in the same network", () => {
+    const p = moveElementToRung(
+      prog2(),
+      { ni: 0, ri: 0, steps: [], ei: 0 }, // contact "a" from r1
+      { ni: 0, ri: 1, steps: [], index: 1 }, // to r2, after "c"
+    );
+    expect(p.networks[0].rungs[0].series).toEqual([newContact("b")]);
+    expect(p.networks[0].rungs[1].series).toEqual([newContact("c"), newContact("a")]);
+  });
+
+  it("moves an element to a rung in another network", () => {
+    const p = moveElementToRung(
+      prog2(),
+      { ni: 0, ri: 0, steps: [], ei: 1 }, // contact "b"
+      { ni: 1, ri: 0, steps: [], index: 0 }, // to n2/r1, before "d"
+    );
+    expect(p.networks[0].rungs[0].series).toEqual([newContact("a")]);
+    expect(p.networks[1].rungs[0].series).toEqual([newContact("b"), newContact("d")]);
+  });
+
+  it("within one rung it reduces to a reorder (self-removal shift handled)", () => {
+    const p = moveElementToRung(
+      prog2(),
+      { ni: 0, ri: 0, steps: [], ei: 0 },
+      { ni: 0, ri: 0, steps: [], index: 2 },
+    );
+    expect(p.networks[0].rungs[0].series).toEqual([newContact("b"), newContact("a")]);
   });
 });
 

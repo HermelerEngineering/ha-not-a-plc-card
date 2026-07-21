@@ -362,6 +362,33 @@ export function moveElementAcross(
   return insertElementIn(removed, ni, ri, steps, index, el);
 }
 
+/**
+ * Move an element to an insertion slot in a possibly-different rung/network.
+ * Within one rung this is exactly {@link moveElementAcross} (which corrects the
+ * target for the self-removal shift). Across rungs no shift correction is needed
+ * — removing from the source rung cannot change indices in the target rung — so
+ * it is a plain remove-then-insert.
+ */
+export function moveElementToRung(
+  program: Program,
+  from: { ni: number; ri: number; steps: SeriesStep[]; ei: number },
+  to: { ni: number; ri: number; steps: SeriesStep[]; index: number },
+): Program {
+  if (from.ni === to.ni && from.ri === to.ri) {
+    return moveElementAcross(
+      program,
+      from.ni,
+      from.ri,
+      { steps: from.steps, ei: from.ei },
+      { steps: to.steps, index: to.index },
+    );
+  }
+  const el = elementAt(program, from.ni, from.ri, from.steps, from.ei);
+  if (!el) return program;
+  const removed = removeElementIn(program, from.ni, from.ri, from.steps, from.ei);
+  return insertElementIn(removed, to.ni, to.ri, to.steps, to.index, el);
+}
+
 // Top-level convenience wrappers (steps = []).
 export function addElement(
   program: Program,

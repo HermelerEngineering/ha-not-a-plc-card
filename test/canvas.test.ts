@@ -7,6 +7,7 @@ import {
   nearestSlot,
   nearestTarget,
   reorderDelta,
+  rungDropGap,
 } from "../src/canvas";
 
 describe("elementLabel", () => {
@@ -55,6 +56,33 @@ describe("reorderDelta", () => {
     // element 0 dropped at the far end of a 3-element series (slot 3) → last.
     expect(reorderDelta(0, 3)).toBe(2);
     expect(reorderDelta(0, 2)).toBe(1);
+  });
+});
+
+describe("rungDropGap", () => {
+  // Three rung bands, 40 tall, 10 apart: r0 [0,40], r1 [50,90], r2 [100,140].
+  const bands = [
+    { ri: 0, top: 0, bottom: 40 },
+    { ri: 1, top: 50, bottom: 90 },
+    { ri: 2, top: 100, bottom: 140 },
+  ];
+
+  it("returns 0 above everything and count below everything", () => {
+    expect(rungDropGap(bands, -20)).toBe(0);
+    expect(rungDropGap(bands, 999)).toBe(3);
+  });
+
+  it("drops before or after a rung by its midpoint", () => {
+    expect(rungDropGap(bands, 5)).toBe(0); // top half of r0 → before r0
+    expect(rungDropGap(bands, 35)).toBe(1); // bottom half of r0 → after r0
+    expect(rungDropGap(bands, 55)).toBe(1); // top half of r1 → before r1
+    expect(rungDropGap(bands, 130)).toBe(3); // bottom half of r2 → after r2
+  });
+
+  it("treats an inter-rung gap as before the next rung", () => {
+    // y = 45 is in the gap between r0 and r1; it is <= r1.bottom and below r1's
+    // midpoint check only applies once inside — here it falls to the r1 band test.
+    expect(rungDropGap(bands, 45)).toBe(1);
   });
 });
 

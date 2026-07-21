@@ -85,6 +85,28 @@ export function reorderDelta(ei: number, drop: number): number {
   return target - ei;
 }
 
+/**
+ * The gap index (0..count) a rung would drop into for a pointer at user-y `y`,
+ * given each rung's vertical band. Above every band → 0; below every band →
+ * count; within a band → before or after that rung by its midpoint. Used to
+ * reorder rungs by dragging.
+ */
+export function rungDropGap(
+  bands: { ri: number; top: number; bottom: number }[],
+  y: number,
+): number {
+  const sorted = [...bands].sort((a, b) => a.top - b.top);
+  for (let i = 0; i < sorted.length; i++) {
+    const b = sorted[i];
+    if (y <= b.bottom) {
+      // At or above this band: before it (gap i) if above its midpoint, else
+      // after it (gap i + 1). Gaps are ordinal positions among the rungs.
+      return y < (b.top + b.bottom) / 2 ? i : i + 1;
+    }
+  }
+  return sorted.length; // below the last band
+}
+
 /** A rung's interaction geometry within its network SVG (user-space units). */
 export interface RungGeom {
   ri: number;

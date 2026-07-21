@@ -388,6 +388,10 @@ export interface CanvasEdit {
   onAddPath?: (ri: number, steps: SeriesStep[], ei: number) => void;
   onInsertCoil: (ri: number, index: number) => void;
   onSelectCoil: (ri: number, ci: number) => void;
+  /** A pointer went down on a rung's drag handle (to reorder rungs). */
+  onRungPointerDown?: (ri: number, ev: PointerEvent) => void;
+  /** Gap index (0..rungCount) a dragged rung would drop into; draws a line. */
+  rungDrop?: number | null;
   /** Reports a rung's y-band, top-level slot x's, and all drop targets. */
   onGeometry?: (
     ri: number,
@@ -849,7 +853,12 @@ export function renderNetwork(
   if (network.title && !edit) {
     parts.push(svg`<text x=${PAD} y="15" class="network-title">${network.title}</text>`);
   }
+  // Gap y-positions (0..rungCount): gapYs[g] is the top of rung g; the last entry
+  // is the bottom of the last rung. Used to place the rung-reorder drop line.
+  const gapYs: number[] = [];
   network.rungs.forEach((rung, ri) => {
+    const rungTop = y;
+    gapYs.push(rungTop);
     // A rung's own title sits above it, and pushes the rung down by its height —
     // drawn here rather than in `renderRung` so every geometry the editor reports
     // (hit-targets, slot positions, y-bands) keeps using the baseY it is given.
@@ -859,7 +868,30 @@ export function renderNetwork(
     }
     const r = renderRung(rung, y, flow, contentWidth, fbs, state, edit, ri);
     parts.push(r.part);
-    y += r.height + RUNG_GAP;
+    const rungBottom = y + r.height;
+    // A drag handle in the left margin (edit only) to reorder rungs by dragging.
+    if (edit?.onRungPointerDown) {
+      parts.push(
+        svg`<g class="rung-handle"
+          @pointerdown=${(ev: PointerEvent) => edit.onRungPointerDown!(ri, ev)}>
+          <rect class="rung-handle-hit" x="1" y=${rungTop}
+            width=${PAD - 2} height=${rungBottom - rungTop} />
+          <text class="rung-grip" x=${PAD / 2} y=${(rungTop + rungBottom) / 2 + 3}>⋮</text>
+        </g>`,
+      );
+    }
+    y = rungBottom + RUNG_GAP;
   });
+  gapYs.push(y - RUNG_GAP);
+  // The rung-reorder drop line, in the gap the dragged rung would land in.
+  if (edit?.rungDrop != null && network.rungs.length > 0) {
+    const g = Math.max(0, Math.min(edit.rungDrop, network.rungs.length));
+    const last = network.rungs.length;
+    const lineY =
+      g <= 0 ? gapYs[0] - 3 : g >= last ? gapYs[last] + 3 : gapYs[g] - RUNG_GAP / 2;
+    parts.push(
+      svg`<line class="rung-drop-line" x1=${PAD} y1=${lineY} x2=${contentWidth - PAD} y2=${lineY} />`,
+    );
+  }
   return { part: svg`<g>${parts}</g>`, height: y + PAD, width: contentWidth };
 }

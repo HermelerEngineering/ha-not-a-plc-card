@@ -127,7 +127,14 @@ import {
   updateElementIn,
   wrapInBranch,
 } from "./elements";
-import { RungGeom, ToolTarget, hitRung, nearestTarget } from "./canvas";
+import {
+  RungGeom,
+  ToolTarget,
+  hitRung,
+  nearestTarget,
+  reorderDelta,
+  rungDropGap,
+} from "./canvas";
 import { computePowerFlow } from "./power-flow";
 import { validateProgram } from "./validate";
 import { sameSteps } from "./layout";
@@ -259,6 +266,13 @@ export class NotAPlcPanel extends LitElement {
     // or inside a branch), so an element can be dragged across rungs.
     target?: { ni: number; ri: number; steps: SeriesStep[]; index: number };
   };
+  /** In-progress rung reorder drag: source rung and the resolved drop gap. */
+  @state() private _rungDrag?: {
+    ni: number;
+    ri: number;
+    moved: boolean;
+    drop?: number;
+  };
   /** In-progress palette element being dragged onto the live view, and its target. */
   @state() private _placeTool?: Tool;
   @state() private _placeTarget?: {
@@ -278,6 +292,10 @@ export class NotAPlcPanel extends LitElement {
   private _placeMoved = false;
   private readonly _onDragMove = (ev: PointerEvent) => this._dragMove(ev);
   private readonly _onDragUp = (ev: PointerEvent) => this._dragUp(ev);
+  private readonly _onRungMove = (ev: PointerEvent) => this._rungMove(ev);
+  private readonly _onRungUp = () => this._rungUp();
+  private _rungStartX = 0;
+  private _rungStartY = 0;
   private readonly _onPlaceMove = (ev: PointerEvent) => this._placeMove(ev);
   private readonly _onPlaceUp = () => this._placeUp();
 
@@ -1858,6 +1876,52 @@ export class NotAPlcPanel extends LitElement {
     });
   }
 
+  // --- reorder rungs by dragging their handle --------------------------------
+
+  private _rungPointerDown(ni: number, ri: number, ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    this._rungStartX = ev.clientX;
+    this._rungStartY = ev.clientY;
+    this._rungDrag = { ni, ri, moved: false };
+    window.addEventListener("pointermove", this._onRungMove);
+    window.addEventListener("pointerup", this._onRungUp);
+  }
+
+  private _rungMove(ev: PointerEvent): void {
+    const d = this._rungDrag;
+    if (!d) return;
+    let moved = d.moved;
+    if (
+      !moved &&
+      (Math.abs(ev.clientX - this._rungStartX) > 4 ||
+        Math.abs(ev.clientY - this._rungStartY) > 4)
+    ) {
+      moved = true;
+    }
+    // Rungs reorder within their own network; resolve the drop gap from the
+    // pointer y over that network's rung bands.
+    let drop = d.drop;
+    const svg = this._canvasUnder(ev.clientX, ev.clientY);
+    const geoms = svg && Number(svg.dataset.ni) === d.ni ? this._geom.get(d.ni) : undefined;
+    if (svg && geoms) {
+      const { y } = this._toUserXY(svg, ev.clientX, ev.clientY);
+      drop = rungDropGap(geoms, y);
+    }
+    if (moved !== d.moved || drop !== d.drop) this._rungDrag = { ...d, moved, drop };
+  }
+
+  private _rungUp(): void {
+    window.removeEventListener("pointermove", this._onRungMove);
+    window.removeEventListener("pointerup", this._onRungUp);
+    const d = this._rungDrag;
+    this._rungDrag = undefined;
+    if (!d || !d.moved || d.drop == null) return;
+    const delta = reorderDelta(d.ri, d.drop);
+    if (delta !== 0) this._edit((p) => moveRung(p, d.ni, d.ri, delta));
+  }
+
   // --- drag a new element from the palette onto the live view ----------------
 
   private _chipPointerDown(tool: Tool, ev: PointerEvent): void {
@@ -2085,6 +2149,9 @@ export class NotAPlcPanel extends LitElement {
       onAddPath: (ri, steps, ei) => this._addBranchPath(ni, ri, steps, ei),
       onInsertCoil: (ri, index) => this._placeCoil(ni, ri, index),
       onSelectCoil: (ri, ci) => this._selectCoil(ni, ri, ci),
+      onRungPointerDown: (ri, ev) => this._rungPointerDown(ni, ri, ev),
+      rungDrop:
+        this._rungDrag?.moved && this._rungDrag.ni === ni ? this._rungDrag.drop ?? null : null,
       onGeometry: (ri, geom) => {
         const arr = this._geom.get(ni) ?? [];
         arr.push({ ri, ...geom });
@@ -2964,6 +3031,29 @@ export class NotAPlcPanel extends LitElement {
       fill: var(--secondary-text-color);
       font-size: 12px;
       font-weight: 500;
+    }
+    .rung-handle {
+      cursor: grab;
+      touch-action: none;
+    }
+    .rung-handle .rung-handle-hit {
+      fill: transparent;
+    }
+    .rung-handle:hover .rung-handle-hit {
+      fill: var(--secondary-background-color, #eee);
+    }
+    .rung-handle .rung-grip {
+      fill: var(--secondary-text-color);
+      font-size: 16px;
+      font-weight: 700;
+      text-anchor: middle;
+      pointer-events: none;
+      user-select: none;
+    }
+    line.rung-drop-line {
+      stroke: var(--primary-color);
+      stroke-width: 3;
+      stroke-linecap: round;
     }
   `;
 }
